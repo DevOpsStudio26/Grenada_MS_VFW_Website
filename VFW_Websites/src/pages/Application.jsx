@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Shield, CheckCircle, ChevronDown } from "lucide-react";
+import { Shield, CheckCircle, ChevronDown, FileText, X } from "lucide-react";
 import { useContent } from "../hooks/useContent";
 import { submitApplication } from "../services/api";
 import { supabase } from "../services/supabase";
@@ -36,6 +36,22 @@ const emptyFormData = {
     website: "",
 };
 
+// Must match the checks in supabase/functions/submit-application.
+const DD214_TYPES = ["application/pdf", "image/jpeg", "image/png"];
+const DD214_MAX_MB = 10;
+
+function checkDd214(file) {
+    if (!DD214_TYPES.includes(file.type)) {
+        return /\.(heic|heif)$/i.test(file.name)
+            ? "iPhone photos (HEIC) aren't supported. Please save the photo as a JPG, or scan the document as a PDF."
+            : "Please choose a PDF, JPG, or PNG file.";
+    }
+    if (file.size > DD214_MAX_MB * 1024 * 1024) {
+        return `This file is ${(file.size / 1024 / 1024).toFixed(1)} MB. It must be ${DD214_MAX_MB} MB or smaller.`;
+    }
+    return null;
+}
+
 const inputClass =
     "w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-[#D4871A] focus:outline-none";
 
@@ -46,10 +62,21 @@ function Application() {
     const [submitted, setSubmitted] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
+    const [dd214, setDd214] = useState(null);
+    const [dd214Error, setDd214Error] = useState("");
 
     function handleChange(event) {
         const { name, value } = event.target;
         setFormData({ ...formData, [name]: value });
+    }
+
+    function handleDd214Change(event) {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        const problem = checkDd214(file);
+        setDd214Error(problem ?? "");
+        setDd214(problem ? null : file);
     }
 
     async function handleSubmit(event) {
@@ -69,11 +96,11 @@ function Application() {
         setSubmitting(true);
         setError("");
         try {
-            await submitApplication(formData);
+            await submitApplication(formData, dd214);
             setSubmitted(true);
         } catch (submitError) {
             console.error(submitError);
-            setError("Something went wrong sending your application. Please check your details and try again.");
+            setError(submitError.message || "Something went wrong sending your application. Please check your details and try again.");
         } finally {
             setSubmitting(false);
         }
@@ -331,6 +358,48 @@ function Application() {
                                 className={inputClass}
                             />
                         </div>
+                    </div>
+
+                    <div>
+                        <span className="block text-sm font-semibold text-[#0B1E4A] mb-2">
+                            DD-214 (Certificate of Release or Discharge)
+                        </span>
+                        {dd214 ? (
+                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-2 border-[#D4871A] rounded-lg bg-[#FFF5E8]">
+                                <span className="flex items-center gap-2 min-w-0 text-[#0B1E4A]">
+                                    <FileText size={20} className="shrink-0 text-[#D4871A]" />
+                                    <span className="truncate">{dd214.name}</span>
+                                    <span className="shrink-0 text-sm text-gray-500">
+                                        ({(dd214.size / 1024 / 1024).toFixed(1)} MB)
+                                    </span>
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setDd214(null)}
+                                    className="shrink-0 p-1 text-gray-500 hover:text-[#9B1C2E]"
+                                    aria-label="Remove DD-214"
+                                >
+                                    <X size={18} />
+                                </button>
+                            </div>
+                        ) : (
+                            <label className="flex flex-col items-center justify-center gap-1 px-4 py-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-[#D4871A] transition-colors text-center">
+                                <FileText size={28} className="text-gray-400" />
+                                <span className="font-semibold text-[#0B1E4A]">Choose a file to upload</span>
+                                <span className="text-sm text-gray-500">PDF, JPG, or PNG, up to {DD214_MAX_MB} MB</span>
+                                <input
+                                    type="file"
+                                    accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                                    onChange={handleDd214Change}
+                                    className="sr-only"
+                                />
+                            </label>
+                        )}
+                        {dd214Error && <p className="text-sm text-[#9B1C2E] mt-2">{dd214Error}</p>}
+                        <p className="text-xs text-gray-500 mt-2">
+                            Uploading your DD-214 helps us confirm eligibility faster. It's stored privately and only
+                            post officers can view it. You may black out your Social Security number first.
+                        </p>
                     </div>
 
                     <div className="bg-gray-50 rounded-lg p-6 text-sm text-gray-600">

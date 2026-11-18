@@ -1,0 +1,8 @@
+# Edge Function settings for `supabase functions deploy`.
+# Both functions check permissions themselves: submit-application is public on
+# purpose, and respond-to-application verifies the caller is on the admin list.
+[functions.submit-application]
+verify_jwt = false
+
+[functions.respond-to-application]
+verify_jwt = false

@@ -44,7 +44,30 @@ In Supabase, open **Project Settings -> API** and copy the **Project URL** and t
 
 > Never use the **service_role / secret** key in the website. It bypasses all security rules.
 
-### 4. Connect Zeffy
+### 4. Turn on application emails
+Every new application is emailed to the post, and admins can **Accept**, **Decline**, or **Request Info** from **Admin Dashboard -> Forms**, which emails the applicant at the address on their application. This runs in two Supabase Edge Functions (`VFW_Websites/supabase/functions/`) and sends mail through [Resend](https://resend.com) (free plan: 3,000 emails/month).
+
+1. **Resend:** sign up, go to **Domains -> Add Domain**, enter `vfwgrenada.org`, and add the DNS records it shows at your domain host. Wait for it to say **Verified**. Then go to **API Keys -> Create API Key** and copy it.
+2. **Database:** re-run all of `VFW_Websites/supabase/schema.sql` in the SQL Editor. It adds the "Info Requested" status, the private `dd214-documents` storage bucket for uploaded DD-214s, and makes new applications go through the email function.
+3. **Deploy the functions** (needs the [Supabase CLI](https://supabase.com/docs/guides/cli)). From `VFW_Websites/`:
+   ```sh
+   npx supabase login
+   npx supabase link --project-ref your-project-id
+   npx supabase secrets set RESEND_API_KEY=re_xxx \
+     EMAIL_FROM="VFW Post 4488 <applications@vfwgrenada.org>" \
+     ADMIN_EMAIL=commander@vfwgrenada.org \
+     POST_EMAIL=info@vfwgrenada.org
+   npx supabase functions deploy submit-application --no-verify-jwt
+   npx supabase functions deploy respond-to-application --no-verify-jwt
+   ```
+   - `ADMIN_EMAIL`: who gets each new application. Separate several with commas.
+   - `POST_EMAIL`: where applicants' replies go.
+   - `EMAIL_FROM`: must be on the domain verified in Resend.
+4. Submit a test application with your own email, then accept it from the dashboard to check both emails arrive.
+
+The email wording lives in `supabase/functions/respond-to-application/index.ts`. Uploaded DD-214s are never emailed. Admins open them with **Preview** or **Download** on the application, using links that expire after 5 minutes, and deleting an application deletes its DD-214 too. Changing a status with the dropdown on an application does **not** email anyone; only the three buttons do.
+
+### 5. Connect Zeffy
 1. In Zeffy, create a donation form, click **Share**, and copy the link.
 2. In the Admin Dashboard, go to **Pages -> Donations Page**, paste it into **Zeffy donation form link**, and click **Save**.
 

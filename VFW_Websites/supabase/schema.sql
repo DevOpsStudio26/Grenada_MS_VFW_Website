@@ -4,7 +4,8 @@
 --
 -- Security model:
 --   * Visitors (the "anon" role) can READ page content, events, and photos.
---   * Visitors can SUBMIT membership applications but can never read them back.
+--   * Visitors submit membership applications through the submit-application
+--     Edge Function (which also emails the post) and can never read them back.
 --   * Only users listed in public.admins can change anything or read applications.
 --   * These rules are enforced by the database itself (row level security), so
 --     they hold even if someone tampers with the website's JavaScript.
@@ -118,20 +119,32 @@ create table if not exists public.applications (
     zip text not null check (zip ~ '^[0-9]{5}(-[0-9]{4})?$'),
     military_rank text not null default '' check (char_length(military_rank) <= 100),
     unit text not null default '' check (char_length(unit) <= 200),
-    status text not null default 'new' check (status in ('new', 'contacted', 'approved', 'declined')),
+    status text not null default 'new',
+    admin_message text not null default '' check (char_length(admin_message) <= 5000),
+    responded_at timestamptz,
+    dd214_path text not null default '' check (char_length(dd214_path) <= 200),
+    dd214_name text not null default '' check (char_length(dd214_name) <= 200),
     created_at timestamptz not null default now()
 );
 alter table public.applications enable row level security;
 
--- Visitors may only fill in the form fields; id, status, and created_at are set
--- by the database.
-revoke insert on public.applications from anon, authenticated;
-grant insert (first_name, last_name, email, phone, address, city, state, zip, military_rank, unit)
-    on public.applications to anon, authenticated;
+-- Upgrades a database created before applicant emails were added.
+alter table public.applications add column if not exists admin_message text not null default ''
+    check (char_length(admin_message) <= 5000);
+alter table public.applications add column if not exists responded_at timestamptz;
+alter table public.applications add column if not exists dd214_path text not null default ''
+    check (char_length(dd214_path) <= 200);
+alter table public.applications add column if not exists dd214_name text not null default ''
+    check (char_length(dd214_name) <= 200);
+alter table public.applications drop constraint if exists applications_status_check;
+alter table public.applications add constraint applications_status_check
+    check (status in ('new', 'contacted', 'info_requested', 'approved', 'declined'));
+create index if not exists applications_email_created_idx on public.applications (email, created_at);
 
+-- New applications only come in through the submit-application Edge Function,
+-- so every one is checked and emailed to the post. Visitors can't insert directly.
+revoke insert on public.applications from anon, authenticated;
 drop policy if exists "Anyone can submit an application" on public.applications;
-create policy "Anyone can submit an application" on public.applications
-    for insert to anon, authenticated with check (status = 'new');
 
 drop policy if exists "Admins can read applications" on public.applications;
 create policy "Admins can read applications" on public.applications
@@ -169,6 +182,28 @@ create policy "Admins can update site images" on storage.objects
 drop policy if exists "Admins can delete site images" on storage.objects;
 create policy "Admins can delete site images" on storage.objects
     for delete to authenticated using (bucket_id = 'site-images' and public.is_admin());
+
+
+-- ---------------------------------------------------------------------------
+-- DD-214 documents (uploaded with membership applications)
+-- ---------------------------------------------------------------------------
+-- PRIVATE bucket: these contain Social Security numbers. Files are added only by
+-- the submit-application Edge Function, and admins open them through links that
+-- expire after a few minutes. There is deliberately no insert policy.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('dd214-documents', 'dd214-documents', false, 10485760, array['application/pdf', 'image/jpeg', 'image/png'])
+on conflict (id) do update set
+    public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Admins can view DD-214 documents" on storage.objects;
+create policy "Admins can view DD-214 documents" on storage.objects
+    for select to authenticated using (bucket_id = 'dd214-documents' and public.is_admin());
+
+drop policy if exists "Admins can delete DD-214 documents" on storage.objects;
+create policy "Admins can delete DD-214 documents" on storage.objects
+    for delete to authenticated using (bucket_id = 'dd214-documents' and public.is_admin());
 
 
 -- ---------------------------------------------------------------------------

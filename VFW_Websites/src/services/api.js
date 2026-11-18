@@ -7,6 +7,17 @@ function unwrap({ data, error }) {
     return data;
 }
 
+// Calls a Supabase Edge Function and turns its { error } reply into an exception
+// with a message that's safe to show on screen.
+async function callFunction(name, body) {
+    const { data, error } = await supabase.functions.invoke(name, { body });
+    if (error) {
+        const reply = await error.context?.json?.().catch(() => null);
+        throw new Error(reply?.error || "Something went wrong. Please try again.");
+    }
+    return data;
+}
+
 // Today's date as YYYY-MM-DD in the visitor's own time zone.
 function todayString() {
     const now = new Date();
@@ -94,22 +105,23 @@ export async function deletePhoto(photo) {
 
 // ---------- Membership applications ----------
 
-export async function submitApplication(form) {
-    // No .select() afterwards: visitors are allowed to insert but not to read applications.
-    unwrap(
-        await supabase.from("applications").insert({
-            first_name: form.firstName.trim(),
-            last_name: form.lastName.trim(),
-            email: form.email.trim(),
-            phone: form.phone.trim(),
-            address: form.address.trim(),
-            city: form.city.trim(),
-            state: form.state,
-            zip: form.zip.trim(),
-            military_rank: form.militaryRank.trim(),
-            unit: form.unit.trim(),
-        })
-    );
+// Saves the application (plus the optional DD-214 file) and emails the post a copy
+// (supabase/functions/submit-application).
+export async function submitApplication(form, dd214File) {
+    const body = new FormData();
+    Object.entries(form).forEach(([key, value]) => body.append(key, value));
+    if (dd214File) body.append("dd214", dd214File);
+    await callFunction("submit-application", body);
+}
+
+// DD-214s are in a private bucket, so admins get a link that works for 5 minutes.
+// Pass a filename to download instead of opening it.
+export async function getDocumentLink(path, downloadName) {
+    const { data, error } = await supabase.storage
+        .from("dd214-documents")
+        .createSignedUrl(path, 300, downloadName ? { download: downloadName } : undefined);
+    if (error) throw error;
+    return data.signedUrl;
 }
 
 export async function fetchApplications() {
@@ -122,8 +134,18 @@ export async function updateApplicationStatus(id, status) {
     unwrap(await supabase.from("applications").update({ status }).eq("id", id));
 }
 
-export async function deleteApplication(id) {
-    unwrap(await supabase.from("applications").delete().eq("id", id));
+// Accepts, declines, or asks for more info, and emails the applicant
+// (supabase/functions/respond-to-application). action: "approved" | "declined" | "info_requested"
+export async function respondToApplication(id, action, message = "") {
+    return callFunction("respond-to-application", { id, action, message });
+}
+
+export async function deleteApplication(application) {
+    unwrap(await supabase.from("applications").delete().eq("id", application.id));
+    if (application.dd214_path) {
+        const { error } = await supabase.storage.from("dd214-documents").remove([application.dd214_path]);
+        if (error) console.error("Couldn't delete the DD-214 file:", error.message);
+    }
 }
 
 // ---------- Admin sign-in ----------
