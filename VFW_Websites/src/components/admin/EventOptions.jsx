@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
 import { addEventOption, countEventsUsingOption, deleteEventOption } from "../../services/api";
+import { DEFAULT_ADMISSION } from "../../utils/eventSort";
 import { cardClass, inputClass, labelClass, primaryButtonClass } from "./styles";
 
 const ADD_NEW = "__add_new__";
@@ -9,6 +10,13 @@ const MAX_NAME = 50;
 const kindNames = {
     type: { singular: "event type", plural: "Event types", placeholder: "e.g. Karaoke Night" },
     band: { singular: "band", plural: "Bands / performers", placeholder: "e.g. The Delta Ramblers" },
+    admission: {
+        singular: "admission price",
+        plural: "Admission prices",
+        placeholder: "e.g. $15 or Free",
+        none: "Admission: not listed",
+        display: (name) => `Admission: ${name}`,
+    },
 };
 
 // A dropdown of saved choices, with "+ Add new..." at the bottom to add one
@@ -90,14 +98,16 @@ export function OptionSelect({ kind, label, options, value, onChange, onOptionsC
                 </div>
             ) : (
                 <select value={value} onChange={(event) => handleSelect(event.target.value)} disabled={disabled} className={inputClass}>
-                    <option value="">None</option>
+                    <option value="">{names.none ?? "None"}</option>
                     {options.map((option) => (
                         <option key={option} value={option}>
-                            {option}
+                            {names.display ? names.display(option) : option}
                         </option>
                     ))}
                     {/* Keeps an older value visible if its choice was deleted elsewhere. */}
-                    {value && !options.includes(value) && <option value={value}>{value}</option>}
+                    {value && !options.includes(value) && (
+                        <option value={value}>{names.display ? names.display(value) : value}</option>
+                    )}
                     <option value={ADD_NEW}>+ Add new {names.singular}...</option>
                 </select>
             )}
@@ -119,13 +129,15 @@ function EventOptionsManager({ options, onChanged }) {
                 Dropdown lists
             </h2>
             <p className="text-gray-500 text-sm mb-5">
-                The choices for an event's type and band. Visitors can filter events on the home page by any type or
-                band that has an upcoming event.
+                The choices for an event's type, band, and admission. Visitors can filter events on the home page by
+                any type or band that has an upcoming event. New events start at {DEFAULT_ADMISSION} admission when
+                that price is in the list.
             </p>
             {error && <p className="text-sm text-[#9B1C2E] mb-4">{error}</p>}
-            <div className="grid md:grid-cols-2 gap-6">
+            <div className="grid md:grid-cols-3 gap-6">
                 <OptionList kind="type" options={options.type} onChanged={onChanged} onError={setError} />
                 <OptionList kind="band" options={options.band} onChanged={onChanged} onError={setError} />
+                <OptionList kind="admission" options={options.admission} onChanged={onChanged} onError={setError} />
             </div>
         </div>
     );

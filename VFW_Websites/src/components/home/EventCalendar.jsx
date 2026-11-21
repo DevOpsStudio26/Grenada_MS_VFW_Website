@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Clock, Music, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Music, Ticket, X } from "lucide-react";
 import { formatLongDate, parseDate, toDateString, todayString } from "../../utils/dates";
 
 const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -183,6 +183,11 @@ function EventCalendar({ events, onClose }) {
                                                 {event.performer && (
                                                     <span className="flex items-center gap-1">
                                                         <Music size={13} /> {event.performer}
+                                                    </span>
+                                                )}
+                                                {event.admission && (
+                                                    <span className="flex items-center gap-1">
+                                                        <Ticket size={13} /> Admission: {event.admission}
                                                     </span>
                                                 )}
                                                 {event.category && <span className="text-[#A86010]">{event.category}</span>}

@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { Calendar, Clock, ImagePlus, Music, Pencil, Plus, Repeat, Tag, Trash2 } from "lucide-react";
+import { Calendar, Clock, ImagePlus, Music, Pencil, Plus, Repeat, Tag, Ticket, Trash2 } from "lucide-react";
 import {
     createEvents,
+    makeEventRepeat,
     deleteEvent,
     deleteSeriesFrom,
     fetchAllEvents,
     fetchEventOptions,
+    noEventOptions,
     removeUnusedEventImage,
     updateEvent,
     updateSeriesFrom,
@@ -15,7 +17,7 @@ import { checkImageFile } from "../../services/storage";
 import { noSharing, shareAndDescribe } from "../../services/social";
 import EventOptionsManager, { OptionSelect } from "./EventOptions";
 import EventFilters from "./EventFilters";
-import { noEventFilters, sorters } from "../../utils/eventSort";
+import { DEFAULT_ADMISSION, noEventFilters, sorters } from "../../utils/eventSort";
 import { addDays, formatShortDate, MAX_REPEAT_MONTHS, parseDate, repeatDates, repeatOptions, toDateString, todayString } from "../../utils/dates";
 import SocialShareOptions from "./SocialShare";
 import { cardClass, dangerButtonClass, inputClass, labelClass, primaryButtonClass, secondaryButtonClass } from "./styles";
@@ -24,6 +26,7 @@ const emptyEvent = {
     title: "",
     category: "",
     performer: "",
+    admission: "",
     event_date: "",
     event_time: "",
     description: "",
@@ -38,7 +41,7 @@ function EventsTab() {
     const [notices, setNotices] = useState([]);
     const [editing, setEditing] = useState(null);
     const [showPast, setShowPast] = useState(false);
-    const [options, setOptions] = useState({ type: [], band: [] });
+    const [options, setOptions] = useState(noEventOptions);
 
     // Reloads the list after a change.
     async function loadEvents() {
@@ -111,7 +114,10 @@ function EventsTab() {
                 <button
                     onClick={() => {
                         setNotices([]);
-                        setEditing(emptyEvent);
+                        setEditing({
+                            ...emptyEvent,
+                            admission: options.admission.includes(DEFAULT_ADMISSION) ? DEFAULT_ADMISSION : "",
+                        });
                     }}
                     className={`${primaryButtonClass} inline-flex items-center gap-2`}
                 >
@@ -229,6 +235,11 @@ function EventRow({ event, onEdit, onDeleteOne, onDeleteSeries }) {
                                     <Music size={14} /> {event.performer}
                                 </span>
                             )}
+                            {event.admission && (
+                                <span className="flex items-center gap-1">
+                                    <Ticket size={14} /> {event.admission}
+                                </span>
+                            )}
                             {event.repeat_label && (
                                 <span className="flex items-center gap-1 text-[#A86010]">
                                     <Repeat size={14} /> {event.repeat_label}
@@ -276,6 +287,8 @@ function EventRow({ event, onEdit, onDeleteOne, onDeleteSeries }) {
 function EventForm({ initialEvent, options, onOptionsChanged, onCancel, onSaved }) {
     const isNew = !initialEvent.id;
     const inSeries = Boolean(initialEvent.series_id);
+    // New events and existing one-time events can be set to repeat.
+    const canRepeat = !inSeries;
     const [event, setEvent] = useState(initialEvent);
     const [repeat, setRepeat] = useState("none");
     const [repeatUntil, setRepeatUntil] = useState("");
@@ -345,6 +358,7 @@ function EventForm({ initialEvent, options, onOptionsChanged, onCancel, onSaved 
                 title: event.title.trim(),
                 category: event.category,
                 performer: event.performer.trim(),
+                admission: event.admission ?? "",
                 event_time: event.event_time.trim(),
                 description: event.description.trim(),
                 ...image,
@@ -357,6 +371,8 @@ function EventForm({ initialEvent, options, onOptionsChanged, onCancel, onSaved 
             } else if (inSeries && applyToSeries) {
                 await updateEvent(initialEvent.id, { ...fields, event_date: event.event_date });
                 await updateSeriesFrom(initialEvent.series_id, initialEvent.event_date, fields);
+            } else if (canRepeat && dates.length > 1) {
+                await makeEventRepeat(initialEvent.id, fields, dates, repeatLabel);
             } else {
                 await updateEvent(initialEvent.id, { ...fields, event_date: event.event_date });
             }
@@ -364,7 +380,7 @@ function EventForm({ initialEvent, options, onOptionsChanged, onCancel, onSaved 
                 await removeUnusedEventImage(initialEvent.image_path);
             }
 
-            const messages = [{ text: isNew && dates.length > 1 ? `Saved ${dates.length} dates.` : "Saved.", ok: true }];
+            const messages = [{ text: canRepeat && dates.length > 1 ? `Saved ${dates.length} dates.` : "Saved.", ok: true }];
             messages.push(...(await shareAndDescribe("event", savedId, sharing)));
             await onSaved(messages);
         } catch (saveError) {
@@ -407,7 +423,7 @@ function EventForm({ initialEvent, options, onOptionsChanged, onCancel, onSaved 
             </div>
             <div className="grid sm:grid-cols-2 gap-4">
                 <div>
-                    <label className={labelClass}>{isNew ? "Date (first date, if it repeats) *" : "Date *"}</label>
+                    <label className={labelClass}>{canRepeat ? "Date (first date, if it repeats) *" : "Date *"}</label>
                     <input type="date" name="event_date" required value={event.event_date} onChange={handleChange} className={inputClass} />
                 </div>
                 <div>
@@ -422,8 +438,19 @@ function EventForm({ initialEvent, options, onOptionsChanged, onCancel, onSaved 
                     />
                 </div>
             </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+                <OptionSelect
+                    kind="admission"
+                    label="Admission"
+                    options={options.admission}
+                    value={event.admission ?? ""}
+                    onChange={(value) => setEvent((current) => ({ ...current, admission: value }))}
+                    onOptionsChanged={onOptionsChanged}
+                    disabled={saving}
+                />
+            </div>
 
-            {isNew && (
+            {canRepeat && (
                 <div className="grid sm:grid-cols-2 gap-4 p-3 rounded-lg bg-[#F5F1E8]">
                     <div>
                         <label className={labelClass}>Repeats</label>

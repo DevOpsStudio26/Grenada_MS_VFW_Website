@@ -87,6 +87,9 @@ alter table public.events add column if not exists image_url text not null defau
     check (char_length(image_url) <= 1000);
 alter table public.events add column if not exists image_path text not null default ''
     check (char_length(image_path) <= 500);
+-- Admission price shown as "Admission: $10" (picked from the admission dropdown list).
+alter table public.events add column if not exists admission text not null default ''
+    check (char_length(admission) <= 50);
 create index if not exists events_date_idx on public.events (event_date);
 create index if not exists events_series_idx on public.events (series_id, event_date);
 
@@ -100,19 +103,24 @@ create policy "Admins can change events" on public.events
 
 
 -- ---------------------------------------------------------------------------
--- Event dropdown choices (event types and bands)
+-- Event dropdown choices (event types, bands, and admission prices)
 -- ---------------------------------------------------------------------------
--- The choices admins pick from for an event's type and band. Admins add and
--- delete them from the Events tab; visitors filter by them on the home page.
+-- The choices admins pick from for an event's type, band, and admission. Admins
+-- add and delete them from the Events tab; visitors filter by type and band on
+-- the home page.
 create table if not exists public.event_options (
     id uuid primary key default gen_random_uuid(),
-    kind text not null check (kind in ('type', 'band')),
-    -- 50 fits events.category (the shorter of the two event columns).
+    kind text not null,
+    -- 50 fits events.category and events.admission (the shortest event columns).
     name text not null check (char_length(name) between 1 and 50),
     created_at timestamptz not null default now(),
     unique (kind, name)
 );
 alter table public.event_options enable row level security;
+-- Replaces the original type/band-only rule so admission prices are allowed.
+alter table public.event_options drop constraint if exists event_options_kind_check;
+alter table public.event_options add constraint event_options_kind_check
+    check (kind in ('type', 'band', 'admission'));
 
 drop policy if exists "Anyone can read event options" on public.event_options;
 create policy "Anyone can read event options" on public.event_options
@@ -138,6 +146,12 @@ select distinct 'type', category from public.events where category <> ''
 on conflict (kind, name) do nothing;
 insert into public.event_options (kind, name)
 select distinct 'band', performer from public.events where performer <> '' and char_length(performer) <= 50
+on conflict (kind, name) do nothing;
+
+-- $10 is the starting admission price (and the default for new events).
+insert into public.event_options (kind, name)
+select 'admission', '$10'
+where not exists (select 1 from public.event_options where kind = 'admission')
 on conflict (kind, name) do nothing;
 
 

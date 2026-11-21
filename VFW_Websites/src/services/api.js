@@ -67,6 +67,23 @@ export async function createEvents(fields, dates, repeatLabel = "") {
     return created[0];
 }
 
+// Turns an existing one-time event into the first date of a repeating series:
+// saves its changes, then adds the later dates with the same details.
+export async function makeEventRepeat(id, fields, dates, repeatLabel) {
+    const seriesId = crypto.randomUUID();
+    const [firstDate, ...laterDates] = dates;
+    unwrap(
+        await supabase
+            .from("events")
+            .update({ ...fields, event_date: firstDate, series_id: seriesId, repeat_label: repeatLabel })
+            .eq("id", id)
+    );
+    if (laterDates.length) {
+        const rows = laterDates.map((event_date) => ({ ...fields, event_date, series_id: seriesId, repeat_label: repeatLabel }));
+        unwrap(await supabase.from("events").insert(rows));
+    }
+}
+
 // `fields` must not include event_date when updating a whole series.
 export async function updateEvent(id, fields) {
     unwrap(await supabase.from("events").update(fields).eq("id", id));
@@ -108,15 +125,21 @@ export async function uploadEventImage(file) {
 // ---------- Event dropdown choices (types and bands) ----------
 
 // Which events column each kind of choice fills in.
-const optionColumn = { type: "category", band: "performer" };
+const optionColumn = { type: "category", band: "performer", admission: "admission" };
 
-// Returns { type: [...names], band: [...names] }, each sorted A-Z.
+export const noEventOptions = { type: [], band: [], admission: [] };
+
+// Returns { type: [...], band: [...], admission: [...] }. Types and bands are
+// sorted A-Z; admission prices are sorted by amount, with non-prices (like "Free") first.
 export async function fetchEventOptions() {
-    if (!supabase) return { type: [], band: [] };
+    if (!supabase) return noEventOptions;
     const rows = unwrap(await supabase.from("event_options").select("kind, name").order("name"));
+    const namesOf = (kind) => rows.filter((row) => row.kind === kind).map((row) => row.name);
+    const amount = (name) => parseFloat(name.replace(/[^0-9.]/g, "")) || 0;
     return {
-        type: rows.filter((row) => row.kind === "type").map((row) => row.name),
-        band: rows.filter((row) => row.kind === "band").map((row) => row.name),
+        type: namesOf("type"),
+        band: namesOf("band"),
+        admission: namesOf("admission").sort((a, b) => amount(a) - amount(b) || a.localeCompare(b)),
     };
 }
 

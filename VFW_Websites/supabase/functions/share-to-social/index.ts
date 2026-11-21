@@ -48,6 +48,7 @@ async function loadPost(kind: string, id: string) {
             `📅 ${formatDate(event.event_date)}${event.event_time ? ` · ${event.event_time}` : ""}`,
             event.repeat_label && `🔁 ${event.repeat_label}`,
             event.performer && `🎵 ${event.performer}`,
+            event.admission && `🎟 Admission: ${event.admission}`,
         ].filter(Boolean);
         // Blank lines between the title, details, description, and sign-off.
         const message = [event.title, details.join("\n"), event.description, `${POST_NAME}\n${SITE_URL}`]

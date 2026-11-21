@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
-import { Calendar, CalendarDays, Clock, Music, Repeat, Star, Tag } from "lucide-react";
+import { Calendar, CalendarDays, Clock, Music, Repeat, Star, Tag, Ticket } from "lucide-react";
 import { useContent } from "../../hooks/useContent";
 import { useEvents } from "../../hooks/useEvents";
 import { addDays, formatLongDate, parseDate, toDateString, todayString } from "../../utils/dates";
 import EventCalendar from "./EventCalendar";
+import DownloadEvents from "./DownloadEvents";
 
 // Every event card is the same height, so the event area is always exactly
 // three cards tall, whether there are 0, 2, or 20 events. The blue featured
@@ -20,10 +21,19 @@ const timeRanges = [
     { value: "weekend", label: "This weekend" },
     { value: "month", label: "This month" },
     { value: "nextMonth", label: "Next month" },
+    { value: "custom", label: "Pick dates..." },
 ];
 
 // First and last "YYYY-MM-DD" (inclusive) for a time range, or null for any date.
-function rangeFor(value) {
+// "custom" uses the visitor's own dates: one date means just that day; with an
+// end date it's that range.
+function rangeFor(value, customStart = "", customEnd = "") {
+    if (value === "custom") {
+        if (!customStart && !customEnd) return null;
+        const start = customStart || customEnd;
+        const end = customEnd || customStart;
+        return start <= end ? [start, end] : [end, start];
+    }
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     if (value === "week") return [toDateString(today), toDateString(addDays(today, 6))];
@@ -58,6 +68,8 @@ function UpcomingEvents() {
     const [type, setType] = useState("");
     const [performer, setPerformer] = useState("");
     const [when, setWhen] = useState("any");
+    const [customStart, setCustomStart] = useState("");
+    const [customEnd, setCustomEnd] = useState("");
     const [calendarOpen, setCalendarOpen] = useState(false);
     const closeCalendar = useCallback(() => setCalendarOpen(false), []);
 
@@ -65,22 +77,25 @@ function UpcomingEvents() {
     const performers = useMemo(() => uniqueSorted(events.map((event) => event.performer)), [events]);
 
     const filtered = useMemo(() => {
-        const range = rangeFor(when);
+        const range = rangeFor(when, customStart, customEnd);
         return events.filter(
             (event) =>
                 (!type || event.category === type) &&
                 (!performer || event.performer === performer) &&
                 (!range || (event.event_date >= range[0] && event.event_date <= range[1]))
         );
-    }, [events, type, performer, when]);
+    }, [events, type, performer, when, customStart, customEnd]);
 
-    const isFiltered = type || performer || when !== "any";
+    const isFiltered = type || performer || (when !== "any" && rangeFor(when, customStart, customEnd));
     const [featuredEvent, ...otherEvents] = filtered;
+    const today = todayString();
 
     function clearFilters() {
         setType("");
         setPerformer("");
         setWhen("any");
+        setCustomStart("");
+        setCustomEnd("");
     }
 
     return (
@@ -97,12 +112,15 @@ function UpcomingEvents() {
                         <div className="w-12 h-1 bg-[#D4871A] mt-2 rounded" />
                     </div>
                     {events.length > 0 && (
-                        <button
-                            onClick={() => setCalendarOpen(true)}
-                            className="inline-flex items-center gap-2 bg-[#0B1E4A] text-white px-4 py-2 rounded-md font-semibold hover:bg-[#162F5E] transition-colors"
-                        >
-                            <CalendarDays size={18} /> View calendar
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <DownloadEvents events={filtered} isFiltered={Boolean(isFiltered)} />
+                            <button
+                                onClick={() => setCalendarOpen(true)}
+                                className="inline-flex items-center gap-2 bg-[#0B1E4A] text-white px-4 py-2 rounded-md font-semibold hover:bg-[#162F5E] transition-colors"
+                            >
+                                <CalendarDays size={18} /> View calendar
+                            </button>
+                        </div>
                     )}
                 </div>
 
@@ -140,6 +158,28 @@ function UpcomingEvents() {
                                 </option>
                             ))}
                         </select>
+                        {when === "custom" && (
+                            <div className="flex flex-wrap items-center gap-2 text-sm text-[#0B1E4A]">
+                                <input
+                                    type="date"
+                                    value={customStart}
+                                    min={today}
+                                    onChange={(event) => setCustomStart(event.target.value)}
+                                    className={selectClass}
+                                    aria-label="Date, or start of date range"
+                                />
+                                <span className="text-gray-500">to</span>
+                                <input
+                                    type="date"
+                                    value={customEnd}
+                                    min={customStart || today}
+                                    onChange={(event) => setCustomEnd(event.target.value)}
+                                    className={selectClass}
+                                    aria-label="End of date range (optional)"
+                                />
+                                <span className="text-xs text-gray-400">(end date optional)</span>
+                            </div>
+                        )}
                         {isFiltered && (
                             <button onClick={clearFilters} className="text-sm text-[#A86010] hover:underline">
                                 Clear filters
@@ -217,6 +257,11 @@ function EventMeta({ event, light, oneLine }) {
             {event.event_time && (
                 <span className="flex items-center gap-1">
                     <Clock size={13} /> {event.event_time}
+                </span>
+            )}
+            {event.admission && (
+                <span className="flex items-center gap-1">
+                    <Ticket size={13} /> Admission: {event.admission}
                 </span>
             )}
             {event.performer && (

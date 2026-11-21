@@ -19,3 +19,6 @@ export const sortChoices = [
 export const DEFAULT_SORT = "dateAsc";
 
 export const noEventFilters = { search: "", sortBy: DEFAULT_SORT, type: "", band: "" };
+
+// Admission price new events start with (if it's in the admission list).
+export const DEFAULT_ADMISSION = "$10";
