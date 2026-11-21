@@ -73,6 +73,23 @@ create table if not exists public.events (
 );
 alter table public.events enable row level security;
 
+-- Upgrades for event types, bands, flyers, and repeating events.
+-- category/performer power the filters on the home page. Events created as a
+-- repeating series share a series_id so they can be edited or deleted together.
+alter table public.events add column if not exists category text not null default ''
+    check (char_length(category) <= 50);
+alter table public.events add column if not exists performer text not null default ''
+    check (char_length(performer) <= 200);
+alter table public.events add column if not exists series_id uuid;
+alter table public.events add column if not exists repeat_label text not null default ''
+    check (char_length(repeat_label) <= 100);
+alter table public.events add column if not exists image_url text not null default ''
+    check (char_length(image_url) <= 1000);
+alter table public.events add column if not exists image_path text not null default ''
+    check (char_length(image_path) <= 500);
+create index if not exists events_date_idx on public.events (event_date);
+create index if not exists events_series_idx on public.events (series_id, event_date);
+
 drop policy if exists "Anyone can read events" on public.events;
 create policy "Anyone can read events" on public.events
     for select to anon, authenticated using (true);
@@ -204,6 +221,50 @@ create policy "Admins can view DD-214 documents" on storage.objects
 drop policy if exists "Admins can delete DD-214 documents" on storage.objects;
 create policy "Admins can delete DD-214 documents" on storage.objects
     for delete to authenticated using (bucket_id = 'dd214-documents' and public.is_admin());
+
+-- Admins can add files to an application from the Forms tab (for example, a
+-- document the applicant emailed in). Visitors still can't upload here directly.
+drop policy if exists "Admins can upload DD-214 documents" on storage.objects;
+create policy "Admins can upload DD-214 documents" on storage.objects
+    for insert to authenticated with check (bucket_id = 'dd214-documents' and public.is_admin());
+
+
+-- ---------------------------------------------------------------------------
+-- Application documents (every file attached to an application)
+-- ---------------------------------------------------------------------------
+-- One row per file in the dd214-documents bucket. The applicant's upload is
+-- added by the submit-application Edge Function; admins add and remove the rest.
+create table if not exists public.application_documents (
+    id uuid primary key default gen_random_uuid(),
+    application_id uuid not null references public.applications (id) on delete cascade,
+    storage_path text not null unique check (char_length(storage_path) between 1 and 200),
+    file_name text not null check (char_length(file_name) between 1 and 200),
+    added_by text not null default 'applicant' check (added_by in ('applicant', 'admin')),
+    created_at timestamptz not null default now()
+);
+alter table public.application_documents enable row level security;
+create index if not exists application_documents_application_idx
+    on public.application_documents (application_id, created_at);
+
+drop policy if exists "Admins can read application documents" on public.application_documents;
+create policy "Admins can read application documents" on public.application_documents
+    for select to authenticated using (public.is_admin());
+
+drop policy if exists "Admins can add application documents" on public.application_documents;
+create policy "Admins can add application documents" on public.application_documents
+    for insert to authenticated with check (public.is_admin() and added_by = 'admin');
+
+drop policy if exists "Admins can delete application documents" on public.application_documents;
+create policy "Admins can delete application documents" on public.application_documents
+    for delete to authenticated using (public.is_admin());
+
+-- Moves DD-214s saved before this table existed into it. Safe to run again.
+insert into public.application_documents (application_id, storage_path, file_name, added_by, created_at)
+select id, dd214_path, coalesce(nullif(dd214_name, ''), 'DD-214'), 'applicant', created_at
+from public.applications
+where dd214_path <> ''
+on conflict (storage_path) do nothing;
+update public.applications set dd214_path = '', dd214_name = '' where dd214_path <> '';
 
 
 -- ---------------------------------------------------------------------------

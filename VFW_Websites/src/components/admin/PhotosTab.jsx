@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { ImagePlus, Trash2, Upload } from "lucide-react";
 import { addPhoto, deletePhoto, fetchPhotos, updatePhoto } from "../../services/api";
 import { checkImageFile } from "../../services/storage";
+import { noSharing, shareAndDescribe } from "../../services/social";
+import SocialShareOptions from "./SocialShare";
 import { cardClass, inputClass, labelClass, primaryButtonClass, secondaryButtonClass } from "./styles";
 
 function PhotosTab() {
@@ -89,6 +91,8 @@ function UploadForm({ onUploaded }) {
     const [previewUrl, setPreviewUrl] = useState("");
     const [caption, setCaption] = useState("");
     const [inSlideshow, setInSlideshow] = useState(false);
+    const [sharing, setSharing] = useState(noSharing);
+    const [notices, setNotices] = useState([]);
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState("");
 
@@ -115,7 +119,10 @@ function UploadForm({ onUploaded }) {
         setUploading(true);
         setError("");
         try {
-            await addPhoto(file, caption.trim(), inSlideshow);
+            setNotices([]);
+            const photo = await addPhoto(file, caption.trim(), inSlideshow);
+            setNotices(await shareAndDescribe("photo", photo.id, sharing));
+            setSharing(noSharing);
             chooseFile(null);
             setCaption("");
             setInSlideshow(false);
@@ -175,7 +182,18 @@ function UploadForm({ onUploaded }) {
                 <input type="checkbox" checked={inSlideshow} onChange={(event) => setInSlideshow(event.target.checked)} />
                 Also show in the home page slideshow
             </label>
+            <SocialShareOptions
+                value={sharing}
+                onChange={setSharing}
+                disabled={uploading}
+                instagramNote="Instagram only accepts JPG photos. The caption is used as the post text."
+            />
             {error && <p className="text-sm text-[#9B1C2E]">{error}</p>}
+            {notices.map((notice) => (
+                <p key={notice.text} className={`text-sm ${notice.ok ? "text-green-700" : "text-[#9B1C2E]"}`}>
+                    {notice.text}
+                </p>
+            ))}
             <div className="flex items-center gap-3 flex-wrap">
                 <button type="submit" disabled={uploading || !file} className={`${primaryButtonClass} inline-flex items-center gap-2`}>
                     <Upload size={18} /> {uploading ? "Uploading..." : "Step 2: Upload"}

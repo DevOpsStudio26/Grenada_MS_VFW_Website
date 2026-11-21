@@ -4,6 +4,7 @@
 // with the site.
 export const defaultContent = {
     site: {
+        textSize: "normal",
         footerTagline: "Supporting veterans and their families in our community since 1945.",
         locationLabel: "Grenada, Mississippi",
         mapUrl: "https://maps.app.goo.gl/C2iNEjx8fK6wDhAfA",

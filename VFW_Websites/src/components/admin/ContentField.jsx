@@ -30,6 +30,16 @@ function FieldInput({ field, value, onChange }) {
             return <UrlInput field={field} value={value ?? ""} onChange={onChange} />;
         case "image":
             return <ImageInput value={value ?? ""} onChange={onChange} />;
+        case "select":
+            return (
+                <select value={value ?? ""} onChange={(event) => onChange(event.target.value)} className={inputClass}>
+                    {field.options.map((option) => (
+                        <option key={option.value} value={option.value}>
+                            {option.label}
+                        </option>
+                    ))}
+                </select>
+            );
         case "list":
             return <ListInput field={field} items={value ?? []} onChange={onChange} />;
         default:

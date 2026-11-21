@@ -67,6 +67,14 @@ function Footer() {
                     </ul>
                 </div>
             </div>
+            <p
+                className="max-w-[1400px] mx-auto mt-10 pt-6 border-t border-white/10 text-center text-xs text-[#a2afce]"
+                style={{ fontFamily: "'Source Sans 3', system-ui, sans-serif" }}
+            >
+                <Link to="/privacy" className="hover:text-[#c98b36] transition-colors">
+                    Privacy Policy
+                </Link>
+            </p>
         </footer>
     );
 }

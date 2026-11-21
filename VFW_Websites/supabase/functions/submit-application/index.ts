@@ -43,8 +43,6 @@ Deno.serve(async (request) => {
         city: text(body.city, 100),
         state: text(body.state, 50),
         zip: text(body.zip, 10),
-        military_rank: text(body.militaryRank, 100),
-        unit: text(body.unit, 200),
     };
 
     if (
@@ -71,34 +69,50 @@ Deno.serve(async (request) => {
         return json({ error: "We've already received your application. We'll be in touch soon." }, 429);
     }
 
-    // Optional DD-214
+    // Required DD-214
     const upload = form.get("dd214");
-    let documentPath = "";
-    let documentName = "";
-    if (upload instanceof File && upload.size > 0) {
-        const bytes = new Uint8Array(await upload.arrayBuffer());
-        const type = detectDocumentType(bytes);
-        if (!type || bytes.length > MAX_DOCUMENT_BYTES) {
-            return json({ error: "Your DD-214 must be a PDF, JPG, or PNG file under 10 MB." }, 400);
-        }
-        documentPath = `${crypto.randomUUID()}.${type.ext}`;
-        documentName = safeFilename(upload.name);
-        const { error: uploadError } = await db.storage
-            .from(DOCUMENT_BUCKET)
-            .upload(documentPath, bytes, { contentType: type.contentType });
-        if (uploadError) {
-            console.error("DD-214 upload failed:", uploadError.message);
-            return json({ error: "Your DD-214 couldn't be uploaded. Please try again." }, 500);
-        }
+    if (!(upload instanceof File) || upload.size === 0) {
+        return json({ error: "Please upload your DD-214 to apply." }, 400);
+    }
+    const bytes = new Uint8Array(await upload.arrayBuffer());
+    const type = detectDocumentType(bytes);
+    if (!type || bytes.length > MAX_DOCUMENT_BYTES) {
+        return json({ error: "Your DD-214 must be a PDF, JPG, or PNG file under 10 MB." }, 400);
+    }
+    const documentPath = `${crypto.randomUUID()}.${type.ext}`;
+    const documentName = safeFilename(upload.name);
+    const { error: uploadError } = await db.storage
+        .from(DOCUMENT_BUCKET)
+        .upload(documentPath, bytes, { contentType: type.contentType });
+    if (uploadError) {
+        console.error("DD-214 upload failed:", uploadError.message);
+        return json({ error: "Your DD-214 couldn't be uploaded. Please try again." }, 500);
     }
 
-    const { error: insertError } = await db
+    const { data: saved, error: insertError } = await db
         .from("applications")
-        .insert({ ...application, dd214_path: documentPath, dd214_name: documentName });
+        .insert(application)
+        .select("id")
+        .single();
     if (insertError) {
         console.error("Saving application failed:", insertError.message);
-        if (documentPath) await db.storage.from(DOCUMENT_BUCKET).remove([documentPath]);
+        await db.storage.from(DOCUMENT_BUCKET).remove([documentPath]);
         return json({ error: "Something went wrong sending your application. Please try again." }, 500);
+    }
+
+    if (documentPath) {
+        const { error: documentError } = await db.from("application_documents").insert({
+            application_id: saved.id,
+            storage_path: documentPath,
+            file_name: documentName,
+            added_by: "applicant",
+        });
+        if (documentError) {
+            console.error("Saving DD-214 record failed:", documentError.message);
+            await db.storage.from(DOCUMENT_BUCKET).remove([documentPath]);
+            await db.from("applications").delete().eq("id", saved.id);
+            return json({ error: "Your DD-214 couldn't be uploaded. Please try again." }, 500);
+        }
     }
 
     // The application is saved even if this email fails, so it still shows in the dashboard
@@ -110,9 +124,7 @@ Deno.serve(async (request) => {
             ["Email", application.email],
             ["Phone", application.phone],
             ["Address", `${application.address}, ${application.city}, ${application.state} ${application.zip}`],
-            ["Military rank", application.military_rank],
-            ["Unit/Division", application.unit],
-            ["DD-214", documentPath ? "Uploaded. View it in the Admin Dashboard." : ""],
+            ["DD-214", "Uploaded. View it in the Admin Dashboard."],
         ]
             .filter(([, value]) => value)
             .map(

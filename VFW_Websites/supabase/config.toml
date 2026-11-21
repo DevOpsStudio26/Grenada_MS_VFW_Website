@@ -6,3 +6,7 @@ verify_jwt = false
 
 [functions.respond-to-application]
 verify_jwt = false
+
+# Admin-only; checks the caller is on the admin list itself.
+[functions.share-to-social]
+verify_jwt = false

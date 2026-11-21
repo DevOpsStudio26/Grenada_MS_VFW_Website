@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
-import { uploadImage, deleteImage } from "./storage";
+import { uploadImage, deleteImage, uploadDocument, deleteDocumentFiles, DOCUMENT_BUCKET } from "./storage";
+import { todayString } from "../utils/dates";
 
 // Supabase returns { data, error } instead of throwing; this turns errors into exceptions.
 function unwrap({ data, error }) {
@@ -16,14 +17,6 @@ async function callFunction(name, body) {
         throw new Error(reply?.error || "Something went wrong. Please try again.");
     }
     return data;
-}
-
-// Today's date as YYYY-MM-DD in the visitor's own time zone.
-function todayString() {
-    const now = new Date();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    return `${now.getFullYear()}-${month}-${day}`;
 }
 
 // ---------- Page content ----------
@@ -57,20 +50,68 @@ export async function fetchUpcomingEvents() {
 }
 
 export async function fetchAllEvents() {
-    return unwrap(await supabase.from("events").select("*").order("event_date", { ascending: false }));
+    return unwrap(await supabase.from("events").select("*").order("event_date"));
 }
 
-export async function saveEvent({ id, title, description, event_date, event_time }) {
-    const fields = { title, description, event_date, event_time };
-    if (id) {
-        unwrap(await supabase.from("events").update(fields).eq("id", id));
-    } else {
-        unwrap(await supabase.from("events").insert(fields));
-    }
+// Creates one event, or one per date for a repeating event (sharing a series_id).
+// Returns the first event created.
+export async function createEvents(fields, dates, repeatLabel = "") {
+    const seriesId = dates.length > 1 ? crypto.randomUUID() : null;
+    const rows = dates.map((event_date) => ({
+        ...fields,
+        event_date,
+        series_id: seriesId,
+        repeat_label: seriesId ? repeatLabel : "",
+    }));
+    const created = unwrap(await supabase.from("events").insert(rows).select().order("event_date"));
+    return created[0];
 }
 
-export async function deleteEvent(id) {
-    unwrap(await supabase.from("events").delete().eq("id", id));
+// `fields` must not include event_date when updating a whole series.
+export async function updateEvent(id, fields) {
+    unwrap(await supabase.from("events").update(fields).eq("id", id));
+}
+
+// Updates this date and every later date in the series.
+export async function updateSeriesFrom(seriesId, fromDate, fields) {
+    unwrap(await supabase.from("events").update(fields).eq("series_id", seriesId).gte("event_date", fromDate));
+}
+
+export async function deleteEvent(event) {
+    unwrap(await supabase.from("events").delete().eq("id", event.id));
+    await removeUnusedEventImage(event.image_path);
+}
+
+// Deletes this date and every later date in the series.
+export async function deleteSeriesFrom(event) {
+    unwrap(
+        await supabase.from("events").delete().eq("series_id", event.series_id).gte("event_date", event.event_date)
+    );
+    await removeUnusedEventImage(event.image_path);
+}
+
+// Events in a series share one flyer, so it's only deleted once nothing uses it.
+export async function removeUnusedEventImage(path) {
+    if (!path) return;
+    const { count, error } = await supabase
+        .from("events")
+        .select("id", { count: "exact", head: true })
+        .eq("image_path", path);
+    if (error || count > 0) return;
+    await deleteImage(path).catch((deleteError) => console.error("Couldn't delete flyer:", deleteError.message));
+}
+
+export async function uploadEventImage(file) {
+    return uploadImage(file, "events");
+}
+
+// ---------- Facebook & Instagram ----------
+
+// Posts an event or photo to the post's Facebook Page and/or Instagram
+// (supabase/functions/share-to-social). Returns { facebook, instagram }, each
+// "posted", "skipped", or an error message.
+export async function shareToSocial({ kind, id, facebook, instagram }) {
+    return callFunction("share-to-social", { kind, id, facebook, instagram });
 }
 
 // ---------- Photos ----------
@@ -80,13 +121,16 @@ export async function fetchPhotos() {
     return unwrap(await supabase.from("photos").select("*").order("created_at", { ascending: false }));
 }
 
+// Returns the saved photo.
 export async function addPhoto(file, caption, inSlideshow) {
     const { url, path } = await uploadImage(file, "gallery");
     try {
-        unwrap(
+        return unwrap(
             await supabase
                 .from("photos")
                 .insert({ url, storage_path: path, caption, in_slideshow: inSlideshow })
+                .select()
+                .single()
         );
     } catch (error) {
         await deleteImage(path).catch(() => {});
@@ -114,20 +158,48 @@ export async function submitApplication(form, dd214File) {
     await callFunction("submit-application", body);
 }
 
-// DD-214s are in a private bucket, so admins get a link that works for 5 minutes.
+// Documents are in a private bucket, so admins get a link that works for 5 minutes.
 // Pass a filename to download instead of opening it.
 export async function getDocumentLink(path, downloadName) {
     const { data, error } = await supabase.storage
-        .from("dd214-documents")
+        .from(DOCUMENT_BUCKET)
         .createSignedUrl(path, 300, downloadName ? { download: downloadName } : undefined);
     if (error) throw error;
     return data.signedUrl;
 }
 
+// Each application comes with its files as `application_documents`, oldest first.
 export async function fetchApplications() {
     return unwrap(
-        await supabase.from("applications").select("*").order("created_at", { ascending: false })
+        await supabase
+            .from("applications")
+            .select("*, application_documents(*)")
+            .order("created_at", { ascending: false })
+            .order("created_at", { referencedTable: "application_documents" })
     );
+}
+
+// Attaches a file to an application, e.g. a document the applicant emailed in.
+export async function addApplicationDocument(applicationId, file) {
+    const path = await uploadDocument(file, applicationId);
+    try {
+        unwrap(
+            await supabase.from("application_documents").insert({
+                application_id: applicationId,
+                storage_path: path,
+                file_name: file.name.slice(0, 200),
+                added_by: "admin",
+            })
+        );
+    } catch (error) {
+        await deleteDocumentFiles([path]).catch(() => {});
+        throw error;
+    }
+}
+
+export async function deleteApplicationDocument(document) {
+    unwrap(await supabase.from("application_documents").delete().eq("id", document.id));
+    await deleteDocumentFiles([document.storage_path]);
 }
 
 export async function updateApplicationStatus(id, status) {
@@ -140,12 +212,15 @@ export async function respondToApplication(id, action, message = "") {
     return callFunction("respond-to-application", { id, action, message });
 }
 
+// Deleting the application removes its document rows too (on delete cascade);
+// this then removes the files themselves.
 export async function deleteApplication(application) {
+    const paths = (application.application_documents ?? []).map((document) => document.storage_path);
+    if (application.dd214_path) paths.push(application.dd214_path);
     unwrap(await supabase.from("applications").delete().eq("id", application.id));
-    if (application.dd214_path) {
-        const { error } = await supabase.storage.from("dd214-documents").remove([application.dd214_path]);
-        if (error) console.error("Couldn't delete the DD-214 file:", error.message);
-    }
+    await deleteDocumentFiles(paths).catch((error) =>
+        console.error("Couldn't delete the application's files:", error.message)
+    );
 }
 
 // ---------- Admin sign-in ----------

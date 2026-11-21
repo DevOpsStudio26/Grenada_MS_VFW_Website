@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
-import { Check, Download, Eye, FileText, HelpCircle, Mail, Phone, Send, Trash2, X } from "lucide-react";
+import { Check, Download, Eye, FileText, HelpCircle, Mail, Phone, Send, Trash2, Upload, X } from "lucide-react";
 import {
+    addApplicationDocument,
     deleteApplication,
+    deleteApplicationDocument,
     fetchApplications,
     getDocumentLink,
     respondToApplication,
     updateApplicationStatus,
 } from "../../services/api";
+import { checkDocumentFile, DOCUMENT_ACCEPT } from "../../services/storage";
 import { mailtoHref, telHref } from "../../utils/text";
 import { cardClass, inputClass, primaryButtonClass, secondaryButtonClass } from "./styles";
 
@@ -65,7 +68,8 @@ function FormsTab() {
 
     async function handleDelete(application) {
         const name = `${application.first_name} ${application.last_name}`;
-        const extra = application.dd214_path ? " and their DD-214" : "";
+        const fileCount = (application.application_documents?.length ?? 0) + (application.dd214_path ? 1 : 0);
+        const extra = fileCount ? ` and ${fileCount === 1 ? "its file" : `its ${fileCount} files`}` : "";
         if (!window.confirm(`Permanently delete the application from ${name}${extra}?`)) return;
         try {
             await deleteApplication(application);
@@ -116,6 +120,7 @@ function FormsTab() {
                             onStatusChange={(status) => handleStatusChange(application, status)}
                             onRespond={(action, message) => handleRespond(application, action, message)}
                             onDelete={() => handleDelete(application)}
+                            onDocumentsChanged={loadApplications}
                             onError={setError}
                         />
                     ))}
@@ -130,18 +135,93 @@ const confirmText = {
     declined: "a decline",
 };
 
-// Preview opens the DD-214 in a new tab; Download saves it with a readable name.
-function DocumentLinks({ application, onError }) {
-    const [opening, setOpening] = useState(false);
-    const extension = application.dd214_path.split(".").pop();
-    const downloadName = `DD-214 ${application.first_name} ${application.last_name}.${extension}`;
+// The applicant's DD-214 plus anything an admin attached later (e.g. a file the
+// applicant emailed in). Admins can preview, download, remove, and add files.
+function DocumentsSection({ application, onChanged, onError }) {
+    const documents = application.application_documents ?? [];
+    const [uploading, setUploading] = useState(false);
+    const [uploadError, setUploadError] = useState("");
+
+    async function handleFile(event) {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+
+        const problem = checkDocumentFile(file);
+        setUploadError(problem ?? "");
+        if (problem) return;
+
+        setUploading(true);
+        try {
+            await addApplicationDocument(application.id, file);
+            await onChanged();
+        } catch (addError) {
+            setUploadError(`Couldn't upload ${file.name}: ${addError.message}`);
+        } finally {
+            setUploading(false);
+        }
+    }
+
+    return (
+        <div className="sm:col-span-2 mt-2 p-3 rounded-lg bg-[#EEF4FF]">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <p className="flex items-center gap-2 text-[#0B1E4A] font-semibold">
+                    <FileText size={16} /> Documents ({documents.length})
+                </p>
+                <label
+                    className={`inline-flex items-center gap-1 px-3 py-1 rounded border-2 border-[#0B1E4A] text-[#0B1E4A] font-semibold bg-white hover:bg-[#0B1E4A] hover:text-white transition-colors ${
+                        uploading ? "opacity-60 pointer-events-none" : "cursor-pointer"
+                    }`}
+                >
+                    <Upload size={14} /> {uploading ? "Uploading..." : "Add file"}
+                    <input
+                        type="file"
+                        accept={DOCUMENT_ACCEPT}
+                        onChange={handleFile}
+                        disabled={uploading}
+                        className="hidden"
+                    />
+                </label>
+            </div>
+
+            {documents.length === 0 ? (
+                <p className="text-gray-500">
+                    No files yet. If the applicant emails you a document, save it and click Add file
+                    (PDF, JPG, or PNG, up to 10 MB).
+                </p>
+            ) : (
+                <ul className="divide-y divide-[#D6E2F7]">
+                    {documents.map((document) => (
+                        <DocumentRow
+                            key={document.id}
+                            application={application}
+                            document={document}
+                            onChanged={onChanged}
+                            onError={onError}
+                        />
+                    ))}
+                </ul>
+            )}
+            {uploadError && <p className="text-[#9B1C2E] mt-2">{uploadError}</p>}
+        </div>
+    );
+}
+
+// Preview opens the file in a new tab; Download saves it with a readable name.
+function DocumentRow({ application, document, onChanged, onError }) {
+    const [busy, setBusy] = useState(false);
+    const fromApplicant = document.added_by === "applicant";
+    const extension = document.storage_path.split(".").pop();
+    const downloadName = fromApplicant
+        ? `DD-214 ${application.first_name} ${application.last_name}.${extension}`
+        : document.file_name;
 
     async function open(download) {
         // Open the tab right away; browsers block tabs opened after waiting on the network.
         const tab = download ? null : window.open("", "_blank");
-        setOpening(true);
+        setBusy(true);
         try {
-            const link = await getDocumentLink(application.dd214_path, download ? downloadName : undefined);
+            const link = await getDocumentLink(document.storage_path, download ? downloadName : undefined);
             if (tab) {
                 tab.opener = null;
                 tab.location.href = link;
@@ -150,40 +230,59 @@ function DocumentLinks({ application, onError }) {
             }
         } catch (linkError) {
             tab?.close();
-            onError(`Couldn't open the DD-214: ${linkError.message}`);
+            onError(`Couldn't open ${document.file_name}: ${linkError.message}`);
         } finally {
-            setOpening(false);
+            setBusy(false);
         }
     }
 
+    async function remove() {
+        if (!window.confirm(`Permanently remove "${document.file_name}" from this application?`)) return;
+        setBusy(true);
+        try {
+            await deleteApplicationDocument(document);
+            await onChanged();
+        } catch (removeError) {
+            onError(`Couldn't remove ${document.file_name}: ${removeError.message}`);
+            setBusy(false);
+        }
+    }
+
+    const linkButton =
+        "inline-flex items-center gap-1 px-2 py-1 rounded text-[#0B1E4A] hover:bg-white disabled:opacity-60";
+
     return (
-        <div className="sm:col-span-2 flex flex-wrap items-center gap-2 mt-2 p-2 rounded-lg bg-[#EEF4FF]">
-            <FileText size={16} className="text-[#0B1E4A]" />
-            <span className="text-[#0B1E4A] font-semibold">DD-214</span>
-            <span className="text-gray-500 truncate max-w-[16rem]" title={application.dd214_name}>
-                {application.dd214_name}
-            </span>
-            <span className="flex gap-1 ml-auto">
-                <button
-                    onClick={() => open(false)}
-                    disabled={opening}
-                    className="inline-flex items-center gap-1 px-3 py-1 rounded text-[#0B1E4A] hover:bg-white disabled:opacity-60"
-                >
+        <li className="flex flex-wrap items-center gap-2 py-2">
+            <div className="min-w-0 flex-1">
+                <p className="text-[#0B1E4A] truncate" title={document.file_name}>
+                    {document.file_name}
+                </p>
+                <p className="text-xs text-gray-500">
+                    {fromApplicant ? "Uploaded with application" : "Added by admin"} ·{" "}
+                    {new Date(document.created_at).toLocaleDateString("en-US")}
+                </p>
+            </div>
+            <span className="flex gap-1">
+                <button onClick={() => open(false)} disabled={busy} className={linkButton}>
                     <Eye size={14} /> Preview
                 </button>
-                <button
-                    onClick={() => open(true)}
-                    disabled={opening}
-                    className="inline-flex items-center gap-1 px-3 py-1 rounded text-[#0B1E4A] hover:bg-white disabled:opacity-60"
-                >
+                <button onClick={() => open(true)} disabled={busy} className={linkButton}>
                     <Download size={14} /> Download
                 </button>
+                <button
+                    onClick={remove}
+                    disabled={busy}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded text-[#9B1C2E] hover:bg-white disabled:opacity-60"
+                    aria-label={`Remove ${document.file_name}`}
+                >
+                    <Trash2 size={14} /> Remove
+                </button>
             </span>
-        </div>
+        </li>
     );
 }
 
-function ApplicationCard({ application, onStatusChange, onRespond, onDelete, onError }) {
+function ApplicationCard({ application, onStatusChange, onRespond, onDelete, onDocumentsChanged, onError }) {
     const status = statuses.find((s) => s.value === application.status) ?? statuses[0];
     const emailLink = mailtoHref(application.email);
     const phoneLink = telHref(application.phone);
@@ -261,7 +360,7 @@ function ApplicationCard({ application, onStatusChange, onRespond, onDelete, onE
                         Service: {[application.military_rank, application.unit].filter(Boolean).join(" — ")}
                     </p>
                 )}
-                {application.dd214_path && <DocumentLinks application={application} onError={onError} />}
+                <DocumentsSection application={application} onChanged={onDocumentsChanged} onError={onError} />
             </div>
 
             {application.responded_at && (

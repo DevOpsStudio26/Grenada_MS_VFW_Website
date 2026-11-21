@@ -71,6 +71,20 @@ The email wording lives in `supabase/functions/respond-to-application/index.ts`.
 1. In Zeffy, create a donation form, click **Share**, and copy the link.
 2. In the Admin Dashboard, go to **Pages -> Donations Page**, paste it into **Zeffy donation form link**, and click **Save**.
 
+### 6. Connect Facebook and Instagram (optional)
+When adding an event or uploading a photo, admins can check **Facebook** and/or **Instagram** to post it automatically. This runs in the `share-to-social` Edge Function and needs a Facebook **Page** (not a personal profile). Instagram also needs an Instagram **Business or Creator** account linked to that Page, and only accepts JPG pictures, so events need a JPG flyer image to go to Instagram.
+
+1. Go to [developers.facebook.com](https://developers.facebook.com) -> **My Apps -> Create App**, choose **Other -> Business**.
+2. In **Graph API Explorer**, pick your app, click **Get Token -> Get Page Access Token**, choose the post's Page, and allow `pages_manage_posts`, `pages_read_engagement`, `instagram_basic`, and `instagram_content_publish`.
+3. Make the token long-lived: open the **Access Token Debugger**, click **Extend Access Token**, then call `me/accounts` in the Graph API Explorer with that long-lived user token. The `access_token` shown for your Page is a Page token that doesn't expire. Its `id` is the Page ID.
+4. For Instagram, run `<page-id>?fields=instagram_business_account` in the Explorer; the `id` it returns is the Instagram account ID.
+5. Set the secrets and deploy:
+   ```sh
+   npx supabase secrets set META_PAGE_ID=... META_PAGE_ACCESS_TOKEN=... INSTAGRAM_ACCOUNT_ID=...
+   npx supabase functions deploy share-to-social --no-verify-jwt
+   ```
+If posting fails, the event or photo is still saved and the dashboard shows Facebook's or Instagram's error message.
+
 ## Running locally
 ```sh
 cd VFW_Websites

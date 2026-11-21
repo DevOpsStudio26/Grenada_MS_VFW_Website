@@ -8,13 +8,35 @@ import { zeffyEmbedUrl } from "../utils/text";
 //   textarea - multiple lines (a blank line starts a new paragraph)
 //   url      - a web link (must start with https://)
 //   image    - an uploaded photo (leave empty to use the built-in photo)
+//   select   - a dropdown of `options` ({ value, label })
 //   list     - repeatable items, each made of `itemFields`
+
+// How much each text size scales the whole site (every size is relative to this).
+export const textSizes = {
+    small: "93.75%",
+    normal: "100%",
+    large: "112.5%",
+    xlarge: "125%",
+};
+
 export const contentSections = [
     {
         key: "site",
-        label: "Contact Info & Footer",
-        description: "Shown in the footer on every page and on the Contact page.",
+        label: "Site Settings & Footer",
+        description: "Text size applies to every page. Contact info is shown in the footer and on the Contact page.",
         fields: [
+            {
+                name: "textSize",
+                label: "Text size",
+                type: "select",
+                help: "Makes all text on the website bigger or smaller, including this dashboard.",
+                options: [
+                    { value: "small", label: "Small" },
+                    { value: "normal", label: "Normal" },
+                    { value: "large", label: "Large" },
+                    { value: "xlarge", label: "Extra large" },
+                ],
+            },
             { name: "phone", label: "Main phone number", type: "text" },
             { name: "email", label: "Main email address", type: "text" },
             { name: "locationLabel", label: "Location text", type: "text" },

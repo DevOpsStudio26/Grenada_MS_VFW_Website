@@ -9,3 +9,19 @@
 .gold-divider {
     @apply w-12 h-1 bg-[#D4871A] rounded;
 }
+/* Always-visible gold scroll bar for the home page event list. */
+.events-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #D4871A #F5F1E8;
+}
+.events-scroll::-webkit-scrollbar {
+    width: 8px;
+}
+.events-scroll::-webkit-scrollbar-track {
+    background: #F5F1E8;
+    border-radius: 4px;
+}
+.events-scroll::-webkit-scrollbar-thumb {
+    background: #D4871A;
+    border-radius: 4px;
+}

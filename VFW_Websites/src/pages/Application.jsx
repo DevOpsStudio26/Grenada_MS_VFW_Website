@@ -3,6 +3,7 @@ import { Shield, CheckCircle, ChevronDown, FileText, X } from "lucide-react";
 import { useContent } from "../hooks/useContent";
 import { submitApplication } from "../services/api";
 import { supabase } from "../services/supabase";
+import { checkDocumentFile, DOCUMENT_ACCEPT, DOCUMENT_MAX_MB } from "../services/storage";
 import { usePageMeta } from "../hooks/usePageMeta";
 
 // Full names for the 50 US states. Mississippi is listed first
@@ -30,27 +31,9 @@ const emptyFormData = {
     city: "",
     state: "Mississippi",
     zip: "",
-    militaryRank: "",
-    unit: "",
     // Hidden from people; spam bots tend to fill in every field.
     website: "",
 };
-
-// Must match the checks in supabase/functions/submit-application.
-const DD214_TYPES = ["application/pdf", "image/jpeg", "image/png"];
-const DD214_MAX_MB = 10;
-
-function checkDd214(file) {
-    if (!DD214_TYPES.includes(file.type)) {
-        return /\.(heic|heif)$/i.test(file.name)
-            ? "iPhone photos (HEIC) aren't supported. Please save the photo as a JPG, or scan the document as a PDF."
-            : "Please choose a PDF, JPG, or PNG file.";
-    }
-    if (file.size > DD214_MAX_MB * 1024 * 1024) {
-        return `This file is ${(file.size / 1024 / 1024).toFixed(1)} MB. It must be ${DD214_MAX_MB} MB or smaller.`;
-    }
-    return null;
-}
 
 const inputClass =
     "w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-[#D4871A] focus:outline-none";
@@ -74,7 +57,7 @@ function Application() {
         const file = event.target.files?.[0];
         event.target.value = "";
         if (!file) return;
-        const problem = checkDd214(file);
+        const problem = checkDocumentFile(file);
         setDd214Error(problem ?? "");
         setDd214(problem ? null : file);
     }
@@ -90,6 +73,11 @@ function Application() {
 
         if (!supabase) {
             setError("Online applications aren't available yet. Please contact the post directly.");
+            return;
+        }
+
+        if (!dd214) {
+            setDd214Error("Please upload your DD-214 to apply.");
             return;
         }
 
@@ -322,47 +310,9 @@ function Application() {
 
                     <hr className="border-gray-200" />
 
-                    <h3
-                        className="text-lg font-bold text-[#0B1E4A]"
-                        style={{ fontFamily: "'Playfair Display', serif" }}
-                    >
-                        Military Service Information (Optional)
-                    </h3>
-
-                    <div className="grid md:grid-cols-2 gap-6">
-                        <div>
-                            <label className="block text-sm font-semibold text-[#0B1E4A] mb-2">
-                                Military Rank
-                            </label>
-                            <input
-                                type="text"
-                                name="militaryRank"
-                                maxLength={100}
-                                value={formData.militaryRank}
-                                onChange={handleChange}
-                                placeholder="e.g., SGT, CPL, PFC"
-                                className={inputClass}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-semibold text-[#0B1E4A] mb-2">
-                                Unit/Division
-                            </label>
-                            <input
-                                type="text"
-                                name="unit"
-                                maxLength={200}
-                                value={formData.unit}
-                                onChange={handleChange}
-                                placeholder="e.g., 101st Airborne Division"
-                                className={inputClass}
-                            />
-                        </div>
-                    </div>
-
                     <div>
-                        <span className="block text-sm font-semibold text-[#0B1E4A] mb-2">
-                            DD-214 (Certificate of Release or Discharge)
+                        <span id="dd214-label" className="block text-sm font-semibold text-[#0B1E4A] mb-2">
+                            DD-214 (Certificate of Release or Discharge) *
                         </span>
                         {dd214 ? (
                             <div className="flex items-center justify-between gap-3 px-4 py-3 border-2 border-[#D4871A] rounded-lg bg-[#FFF5E8]">
@@ -386,19 +336,20 @@ function Application() {
                             <label className="flex flex-col items-center justify-center gap-1 px-4 py-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-[#D4871A] transition-colors text-center">
                                 <FileText size={28} className="text-gray-400" />
                                 <span className="font-semibold text-[#0B1E4A]">Choose a file to upload</span>
-                                <span className="text-sm text-gray-500">PDF, JPG, or PNG, up to {DD214_MAX_MB} MB</span>
+                                <span className="text-sm text-gray-500">PDF, JPG, or PNG, up to {DOCUMENT_MAX_MB} MB</span>
                                 <input
                                     type="file"
-                                    accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                                    accept={DOCUMENT_ACCEPT}
                                     onChange={handleDd214Change}
+                                    aria-labelledby="dd214-label"
                                     className="sr-only"
                                 />
                             </label>
                         )}
                         {dd214Error && <p className="text-sm text-[#9B1C2E] mt-2">{dd214Error}</p>}
                         <p className="text-xs text-gray-500 mt-2">
-                            Uploading your DD-214 helps us confirm eligibility faster. It's stored privately and only
-                            post officers can view it. You may black out your Social Security number first.
+                            Required to confirm your eligibility. It's stored privately and only post officers can
+                            view it. You may black out your Social Security number first.
                         </p>
                     </div>
 

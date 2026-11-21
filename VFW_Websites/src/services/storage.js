@@ -39,6 +39,51 @@ export async function uploadImage(file, folder) {
     return { url: data.publicUrl, path };
 }
 
+// ---------- Application documents (private dd214-documents bucket) ----------
+
+// Must match the bucket in supabase/schema.sql and the check in
+// supabase/functions/submit-application.
+export const DOCUMENT_BUCKET = "dd214-documents";
+const DOCUMENT_TYPES = {
+    "application/pdf": "pdf",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+};
+export const DOCUMENT_ACCEPT = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
+export const DOCUMENT_MAX_MB = 10;
+
+// Returns a message explaining why a document can't be uploaded, or null if it's fine.
+export function checkDocumentFile(file) {
+    if (!DOCUMENT_TYPES[file.type]) {
+        return /\.(heic|heif)$/i.test(file.name)
+            ? "iPhone photos (HEIC) aren't supported. Please save the photo as a JPG, or scan the document as a PDF."
+            : "Please choose a PDF, JPG, or PNG file.";
+    }
+    if (file.size > DOCUMENT_MAX_MB * 1024 * 1024) {
+        return `This file is ${(file.size / 1024 / 1024).toFixed(1)} MB. It must be ${DOCUMENT_MAX_MB} MB or smaller.`;
+    }
+    return null;
+}
+
+// Uploads a document for an application and returns its storage path.
+export async function uploadDocument(file, applicationId) {
+    const problem = checkDocumentFile(file);
+    if (problem) throw new Error(problem);
+
+    const path = `${applicationId}/${crypto.randomUUID()}.${DOCUMENT_TYPES[file.type]}`;
+    const { error } = await supabase.storage
+        .from(DOCUMENT_BUCKET)
+        .upload(path, file, { contentType: file.type });
+    if (error) throw error;
+    return path;
+}
+
+export async function deleteDocumentFiles(paths) {
+    if (!paths.length) return;
+    const { error } = await supabase.storage.from(DOCUMENT_BUCKET).remove(paths);
+    if (error) throw error;
+}
+
 export async function deleteImage(path) {
     const { error } = await supabase.storage.from(BUCKET).remove([path]);
     if (error) throw error;

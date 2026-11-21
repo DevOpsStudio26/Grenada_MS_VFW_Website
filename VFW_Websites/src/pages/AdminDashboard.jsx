@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { Shield, FileText, Calendar, Image as ImageIcon, Users, LogOut, KeyRound } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Shield, FileText, Calendar, Image as ImageIcon, Users, LogOut, KeyRound, Eye, EyeOff } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { checkIsAdmin } from "../services/api";
+import { markAdminActivity, useIdleSignOut } from "../hooks/useIdleSignOut";
 import PagesTab from "../components/admin/PagesTab";
 import EventsTab from "../components/admin/EventsTab";
 import PhotosTab from "../components/admin/PhotosTab";
@@ -73,7 +74,14 @@ function AdminDashboard() {
     }
 
     if (session && settingPassword) {
-        return <SetPasswordForm onDone={() => setSettingPassword(false)} />;
+        return (
+            <SetPasswordForm
+                onDone={() => {
+                    markAdminActivity();
+                    setSettingPassword(false);
+                }}
+            />
+        );
     }
 
     if (!session) {
@@ -102,9 +110,14 @@ function AdminDashboard() {
 function Dashboard({ email, onChangePassword }) {
     const [activeTab, setActiveTab] = useState(tabs[0].key);
     const { Component } = tabs.find((tab) => tab.key === activeTab);
+    const signOut = useCallback(() => supabase.auth.signOut(), []);
+    const { remaining, staySignedIn } = useIdleSignOut(signOut);
 
     return (
         <div className="min-h-screen bg-[#F5F1E8] py-10">
+            {remaining !== null && (
+                <IdleWarning secondsLeft={Math.ceil(remaining / 1000)} onStay={staySignedIn} onSignOut={signOut} />
+            )}
             <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
                     <div>
@@ -124,7 +137,7 @@ function Dashboard({ email, onChangePassword }) {
                             <KeyRound size={16} /> Change password
                         </button>
                         <button
-                            onClick={() => supabase.auth.signOut()}
+                            onClick={signOut}
                             className="inline-flex items-center gap-2 border-2 border-[#0B1E4A] text-[#0B1E4A] px-4 py-2 rounded-md font-semibold hover:bg-[#0B1E4A] hover:text-white transition-colors"
                         >
                             <LogOut size={16} /> Sign Out
@@ -150,6 +163,70 @@ function Dashboard({ email, onChangePassword }) {
 
                 <Component />
             </div>
+        </div>
+    );
+}
+
+// Shown for the last two minutes before an idle admin is signed out.
+function IdleWarning({ secondsLeft, onStay, onSignOut }) {
+    const minutes = Math.floor(secondsLeft / 60);
+    const seconds = String(secondsLeft % 60).padStart(2, "0");
+    return (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+            <div
+                role="alertdialog"
+                aria-modal="true"
+                aria-labelledby="idle-title"
+                className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 border-t-4 border-[#D4871A] text-center"
+            >
+                <h2 id="idle-title" className="text-xl font-bold text-[#0B1E4A] mb-2" style={{ fontFamily: "'Playfair Display', serif" }}>
+                    Still there?
+                </h2>
+                <p className="text-gray-600 mb-1">You'll be signed out for inactivity in</p>
+                <p className="text-3xl font-bold text-[#D4871A] mb-5" aria-live="polite">
+                    {minutes}:{seconds}
+                </p>
+                <p className="text-xs text-gray-500 mb-5">Save any changes you're working on first.</p>
+                <div className="flex gap-3 justify-center">
+                    <button
+                        onClick={onStay}
+                        autoFocus
+                        className="bg-[#D4871A] text-white px-5 py-2 rounded-md font-semibold hover:bg-[#B8700F] transition-colors"
+                    >
+                        Stay signed in
+                    </button>
+                    <button onClick={onSignOut} className="px-4 py-2 text-gray-600 hover:text-[#0B1E4A]">
+                        Sign out
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// Password field with a show/hide button.
+function PasswordInput({ value, onChange, autoComplete, placeholder }) {
+    const [visible, setVisible] = useState(false);
+    return (
+        <div className="relative">
+            <input
+                type={visible ? "text" : "password"}
+                required
+                autoComplete={autoComplete}
+                value={value}
+                onChange={(event) => onChange(event.target.value)}
+                placeholder={placeholder}
+                className={`${inputClass} pr-12`}
+            />
+            <button
+                type="button"
+                onClick={() => setVisible((shown) => !shown)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500 hover:text-[#0B1E4A]"
+                aria-label={visible ? "Hide password" : "Show password"}
+                aria-pressed={visible}
+            >
+                {visible ? <EyeOff size={20} /> : <Eye size={20} />}
+            </button>
         </div>
     );
 }
@@ -186,6 +263,8 @@ function LoginForm() {
         event.preventDefault();
         setSubmitting(true);
         setError("");
+        // Start the inactivity timer fresh, so an old session time doesn't sign them right out.
+        markAdminActivity();
         const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         setSubmitting(false);
         if (signInError) {
@@ -269,14 +348,11 @@ function LoginForm() {
 
                 <div>
                     <label className="block text-sm font-semibold text-[#0B1E4A] mb-2">Password</label>
-                    <input
-                        type="password"
-                        required
+                    <PasswordInput
                         autoComplete="current-password"
                         value={password}
-                        onChange={(event) => setPassword(event.target.value)}
+                        onChange={setPassword}
                         placeholder="Enter password"
-                        className={inputClass}
                     />
                 </div>
 
@@ -338,25 +414,11 @@ function SetPasswordForm({ onDone }) {
                     <label className="block text-sm font-semibold text-[#0B1E4A] mb-2">
                         New password (at least {MIN_PASSWORD_LENGTH} characters)
                     </label>
-                    <input
-                        type="password"
-                        required
-                        autoComplete="new-password"
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        className={inputClass}
-                    />
+                    <PasswordInput autoComplete="new-password" value={password} onChange={setPassword} />
                 </div>
                 <div>
                     <label className="block text-sm font-semibold text-[#0B1E4A] mb-2">Confirm new password</label>
-                    <input
-                        type="password"
-                        required
-                        autoComplete="new-password"
-                        value={confirm}
-                        onChange={(event) => setConfirm(event.target.value)}
-                        className={inputClass}
-                    />
+                    <PasswordInput autoComplete="new-password" value={confirm} onChange={setConfirm} />
                 </div>
 
                 {error && <p className="text-sm text-[#9B1C2E]">{error}</p>}
