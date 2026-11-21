@@ -1,41 +1,18 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Calendar, CalendarDays, Clock, Music, Repeat, Star, Tag } from "lucide-react";
 import { useContent } from "../../hooks/useContent";
 import { useEvents } from "../../hooks/useEvents";
 import { addDays, formatLongDate, parseDate, toDateString, todayString } from "../../utils/dates";
 import EventCalendar from "./EventCalendar";
 
-// How many event cards show before the list scrolls.
+// Every event card is the same height, so the event area is always exactly
+// three cards tall, whether there are 0, 2, or 20 events. The blue featured
+// card matches it. Tailwind needs these as literal class names:
+//   card = 9.5rem; three cards + two 1rem gaps = 30.5rem.
 const VISIBLE_EVENTS = 3;
-
-// Limits a list's height to exactly its first `count` children (they vary in
-// height), re-measuring when the window or the cards resize.
-function useVisibleCount(count, deps) {
-    const listRef = useRef(null);
-    const [maxHeight, setMaxHeight] = useState(undefined);
-
-    useLayoutEffect(() => {
-        const list = listRef.current;
-        if (!list) return undefined;
-        function measure() {
-            const cards = list.children;
-            if (cards.length <= count) {
-                setMaxHeight(undefined);
-                return;
-            }
-            // The list is position: relative, so offsetTop is measured from its top.
-            const last = cards[count - 1];
-            setMaxHeight(last.offsetTop + last.offsetHeight);
-        }
-        measure();
-        const observer = new ResizeObserver(measure);
-        [...list.children].slice(0, count).forEach((card) => observer.observe(card));
-        return () => observer.disconnect();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [count, ...deps]);
-
-    return { listRef, maxHeight };
-}
+const CARD_HEIGHT = "h-[9.5rem]";
+const AREA_HEIGHT = "lg:h-[30.5rem]";
+const LIST_MAX_HEIGHT = "max-h-[30.5rem]";
 
 const timeRanges = [
     { value: "any", label: "Any date" },
@@ -99,7 +76,6 @@ function UpcomingEvents() {
 
     const isFiltered = type || performer || when !== "any";
     const [featuredEvent, ...otherEvents] = filtered;
-    const { listRef, maxHeight } = useVisibleCount(VISIBLE_EVENTS, [filtered]);
 
     function clearFilters() {
         setType("");
@@ -188,22 +164,32 @@ function UpcomingEvents() {
                     </div>
                 ) : (
                     <>
-                        {/* Columns stretch to the same height, so the featured card
-                            lines up with the top and bottom of the event list. */}
                         <div className="grid lg:grid-cols-5 gap-4">
-                            <FeaturedEvent event={featuredEvent} matchListHeight={otherEvents.length > 0} />
+                            <FeaturedEvent event={featuredEvent} />
 
-                            {otherEvents.length > 0 && (
+                            {otherEvents.length > 0 ? (
                                 <div
-                                    ref={listRef}
-                                    style={{ maxHeight }}
-                                    className="lg:col-span-3 relative overflow-y-auto space-y-4 pr-2 events-scroll"
+                                    className={`lg:col-span-3 ${LIST_MAX_HEIGHT} ${AREA_HEIGHT} overflow-y-auto space-y-4 pr-2 events-scroll`}
                                     tabIndex={0}
                                     aria-label="More upcoming events"
                                 >
                                     {otherEvents.map((event) => (
                                         <EventCard key={event.id} event={event} />
                                     ))}
+                                </div>
+                            ) : (
+                                <div
+                                    className={`lg:col-span-3 ${AREA_HEIGHT} rounded-xl bg-[#F5F1E8] flex flex-col items-center justify-center gap-3 p-8 text-center`}
+                                >
+                                    <p className="text-gray-500">
+                                        {isFiltered ? "No other events match these filters." : "No other upcoming events yet."}
+                                    </p>
+                                    <button
+                                        onClick={() => setCalendarOpen(true)}
+                                        className="text-[#A86010] font-semibold hover:underline"
+                                    >
+                                        View calendar
+                                    </button>
                                 </div>
                             )}
                         </div>
@@ -221,10 +207,13 @@ function UpcomingEvents() {
     );
 }
 
-function EventMeta({ event, light }) {
+// `oneLine` keeps the details to a single line (cut off if too long), so
+// event cards stay the same height.
+function EventMeta({ event, light, oneLine }) {
     const color = light ? "text-[#D4C090]" : "text-gray-500";
+    const layout = oneLine ? "flex-nowrap overflow-hidden whitespace-nowrap" : "flex-wrap gap-y-1";
     return (
-        <div className={`flex flex-wrap gap-x-4 gap-y-1 text-sm ${color}`}>
+        <div className={`flex gap-x-4 text-sm ${layout} ${color}`}>
             {event.event_time && (
                 <span className="flex items-center gap-1">
                     <Clock size={13} /> {event.event_time}
@@ -249,13 +238,13 @@ function EventMeta({ event, light }) {
     );
 }
 
-// With matchListHeight, on wide screens the event list alone decides the row's
-// height (contain: size stops this card's content from stretching it) and this
-// card fills it, scrolling if its own content is taller.
-function FeaturedEvent({ event, matchListHeight }) {
-    const sizing = matchListHeight ? "lg:[contain:size] lg:overflow-y-auto events-scroll" : "overflow-hidden";
+// On wide screens this is always three event cards tall, scrolling inside if
+// its own content (e.g. a flyer plus a long description) is taller.
+function FeaturedEvent({ event }) {
     return (
-        <div className={`lg:col-span-2 bg-[#0B1E4A] rounded-xl text-white flex flex-col ${sizing}`}>
+        <div
+            className={`lg:col-span-2 ${AREA_HEIGHT} bg-[#0B1E4A] rounded-xl text-white flex flex-col overflow-hidden lg:overflow-y-auto events-scroll`}
+        >
             {event.image_url && <img src={event.image_url} alt="" className="w-full max-h-64 object-cover" />}
             <div className="p-7 flex flex-col justify-between flex-1">
                 <div>
@@ -290,17 +279,20 @@ function FeaturedEvent({ event, matchListHeight }) {
 function EventCard({ event }) {
     const date = parseDate(event.event_date);
     return (
-        <div className="bg-[#F5F1E8] rounded-xl p-5 border-l-4 border-[#D4871A] hover:shadow-md transition-shadow">
-            <div className="flex justify-between items-start gap-4">
+        <div
+            className={`${CARD_HEIGHT} flex flex-col overflow-hidden bg-[#F5F1E8] rounded-xl p-5 border-l-4 border-[#D4871A] hover:shadow-md transition-shadow`}
+        >
+            <div className="flex justify-between items-start gap-4 min-h-0">
                 <div className="min-w-0">
                     <h3
-                        className="text-lg font-bold text-[#0B1E4A] mb-1"
+                        className="text-lg font-bold text-[#0B1E4A] mb-1 truncate"
                         style={{ fontFamily: "'Playfair Display', serif" }}
+                        title={event.title}
                     >
                         {event.title}
                     </h3>
                     {event.description && (
-                        <p className="text-gray-600 text-sm mb-2 whitespace-pre-line line-clamp-3">{event.description}</p>
+                        <p className="text-gray-600 text-sm whitespace-pre-line line-clamp-2">{event.description}</p>
                     )}
                 </div>
                 <div className="text-right flex-shrink-0">
@@ -308,7 +300,9 @@ function EventCard({ event }) {
                     <div className="text-gray-400 text-xs">{date.toLocaleDateString("en-US", { month: "short" })}</div>
                 </div>
             </div>
-            <EventMeta event={event} />
+            <div className="mt-auto pt-2">
+                <EventMeta event={event} oneLine />
+            </div>
         </div>
     );
 }
