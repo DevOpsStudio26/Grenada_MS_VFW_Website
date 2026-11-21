@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Calendar, Clock, ImagePlus, Music, Pencil, Plus, Repeat, Tag, Trash2 } from "lucide-react";
 import {
     createEvents,
     deleteEvent,
     deleteSeriesFrom,
     fetchAllEvents,
+    fetchEventOptions,
     removeUnusedEventImage,
     updateEvent,
     updateSeriesFrom,
@@ -12,7 +13,9 @@ import {
 } from "../../services/api";
 import { checkImageFile } from "../../services/storage";
 import { noSharing, shareAndDescribe } from "../../services/social";
-import { eventTypes } from "../../data/eventTypes";
+import EventOptionsManager, { OptionSelect } from "./EventOptions";
+import EventFilters from "./EventFilters";
+import { noEventFilters, sorters } from "../../utils/eventSort";
 import { addDays, formatShortDate, MAX_REPEAT_MONTHS, parseDate, repeatDates, repeatOptions, toDateString, todayString } from "../../utils/dates";
 import SocialShareOptions from "./SocialShare";
 import { cardClass, dangerButtonClass, inputClass, labelClass, primaryButtonClass, secondaryButtonClass } from "./styles";
@@ -35,6 +38,7 @@ function EventsTab() {
     const [notices, setNotices] = useState([]);
     const [editing, setEditing] = useState(null);
     const [showPast, setShowPast] = useState(false);
+    const [options, setOptions] = useState({ type: [], band: [] });
 
     // Reloads the list after a change.
     async function loadEvents() {
@@ -45,20 +49,39 @@ function EventsTab() {
         }
     }
 
+    async function loadOptions() {
+        try {
+            setOptions(await fetchEventOptions());
+        } catch (loadError) {
+            setError(`Couldn't load the type and band lists: ${loadError.message}`);
+        }
+    }
+
     useEffect(() => {
         fetchAllEvents()
             .then(setEvents)
             .catch((loadError) => setError(`Couldn't load events: ${loadError.message}`))
             .finally(() => setLoading(false));
+        fetchEventOptions()
+            .then(setOptions)
+            .catch((loadError) => setError(`Couldn't load the type and band lists: ${loadError.message}`));
     }, []);
 
+    const [filters, setFilters] = useState(noEventFilters);
+
     const today = todayString();
-    const visible = showPast ? [...events].reverse() : events.filter((event) => event.event_date >= today);
     const pastCount = events.filter((event) => event.event_date < today).length;
-    const performers = useMemo(
-        () => [...new Set(events.map((event) => event.performer).filter(Boolean))].sort(),
-        [events]
-    );
+    const query = filters.search.trim().toLowerCase();
+    const visible = events
+        .filter(
+            (event) =>
+                (showPast || event.event_date >= today) &&
+                (!filters.type || event.category === filters.type) &&
+                (!filters.band || event.performer === filters.band) &&
+                (!query || event.title.toLowerCase().includes(query))
+        )
+        .sort(sorters[filters.sortBy]);
+    const isFiltered = filters.type || filters.band || query;
 
     async function runDelete(action) {
         setError("");
@@ -75,7 +98,8 @@ function EventsTab() {
             {editing ? (
                 <EventForm
                     initialEvent={editing}
-                    performers={performers}
+                    options={options}
+                    onOptionsChanged={loadOptions}
                     onCancel={() => setEditing(null)}
                     onSaved={async (messages) => {
                         setEditing(null);
@@ -127,12 +151,18 @@ function EventsTab() {
                     )}
                 </div>
 
+                <EventFilters value={filters} onChange={setFilters} options={options} resultCount={visible.length} />
+
                 {loading ? (
                     <p className="text-gray-500">Loading...</p>
                 ) : visible.length === 0 ? (
-                    <p className="text-gray-500">No upcoming events.</p>
+                    <p className="text-gray-500">{isFiltered ? "No events match these filters." : "No upcoming events."}</p>
                 ) : (
-                    <ul className="divide-y divide-gray-100">
+                    <ul
+                        className="divide-y divide-gray-100 max-h-[32rem] overflow-y-auto pr-2 events-scroll border-y border-gray-100"
+                        tabIndex={0}
+                        aria-label="Events"
+                    >
                         {visible.map((event) => (
                             <EventRow
                                 key={event.id}
@@ -148,6 +178,14 @@ function EventsTab() {
                     </ul>
                 )}
             </div>
+
+            <EventOptionsManager
+                options={options}
+                onChanged={async () => {
+                    await loadOptions();
+                    await loadEvents();
+                }}
+            />
         </div>
     );
 }
@@ -235,7 +273,7 @@ function EventRow({ event, onEdit, onDeleteOne, onDeleteSeries }) {
     );
 }
 
-function EventForm({ initialEvent, performers, onCancel, onSaved }) {
+function EventForm({ initialEvent, options, onOptionsChanged, onCancel, onSaved }) {
     const isNew = !initialEvent.id;
     const inSeries = Boolean(initialEvent.series_id);
     const [event, setEvent] = useState(initialEvent);
@@ -248,8 +286,8 @@ function EventForm({ initialEvent, performers, onCancel, onSaved }) {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
 
-    const options = repeatOptions(event.event_date);
-    const repeatLabel = options.find((option) => option.value === repeat)?.label ?? "";
+    const repeatChoices = repeatOptions(event.event_date);
+    const repeatLabel = repeatChoices.find((option) => option.value === repeat)?.label ?? "";
     let maxUntil = "";
     if (event.event_date) {
         const limit = parseDate(event.event_date);
@@ -348,37 +386,24 @@ function EventForm({ initialEvent, performers, onCancel, onSaved }) {
                 <input name="title" required maxLength={200} value={event.title} onChange={handleChange} className={inputClass} />
             </div>
             <div className="grid sm:grid-cols-2 gap-4">
-                <div>
-                    <label className={labelClass}>Type of event</label>
-                    <select name="category" value={event.category} onChange={handleChange} className={inputClass}>
-                        <option value="">Choose a type</option>
-                        {eventTypes.map((type) => (
-                            <option key={type} value={type}>
-                                {type}
-                            </option>
-                        ))}
-                        {event.category && !eventTypes.includes(event.category) && (
-                            <option value={event.category}>{event.category}</option>
-                        )}
-                    </select>
-                </div>
-                <div>
-                    <label className={labelClass}>Band / performer</label>
-                    <input
-                        name="performer"
-                        maxLength={200}
-                        list="performer-options"
-                        value={event.performer}
-                        onChange={handleChange}
-                        placeholder="Leave blank if none"
-                        className={inputClass}
-                    />
-                    <datalist id="performer-options">
-                        {performers.map((performer) => (
-                            <option key={performer} value={performer} />
-                        ))}
-                    </datalist>
-                </div>
+                <OptionSelect
+                    kind="type"
+                    label="Type of event"
+                    options={options.type}
+                    value={event.category}
+                    onChange={(value) => setEvent((current) => ({ ...current, category: value }))}
+                    onOptionsChanged={onOptionsChanged}
+                    disabled={saving}
+                />
+                <OptionSelect
+                    kind="band"
+                    label="Band / performer"
+                    options={options.band}
+                    value={event.performer}
+                    onChange={(value) => setEvent((current) => ({ ...current, performer: value }))}
+                    onOptionsChanged={onOptionsChanged}
+                    disabled={saving}
+                />
             </div>
             <div className="grid sm:grid-cols-2 gap-4">
                 <div>
@@ -408,7 +433,7 @@ function EventForm({ initialEvent, performers, onCancel, onSaved }) {
                             disabled={!event.event_date}
                             className={inputClass}
                         >
-                            {options.map((option) => (
+                            {repeatChoices.map((option) => (
                                 <option key={option.value} value={option.value}>
                                     {option.label}
                                 </option>

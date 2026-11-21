@@ -1,27 +1,12 @@
-// Public endpoint for the Join Us form: saves the application (and the optional
-// DD-214 in a private bucket), then emails the post a copy of what was entered.
+// Public endpoint for the Join Us form: saves the application, then emails the
+// post a copy of what was entered. DD-214s are requested from the applicant by
+// email afterward and attached by an admin (private dd214-documents bucket).
 
 import { corsHeaders, db, emailLayout, escapeHtml, json, sendEmail, text } from "../_shared/helpers.ts";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ZIP_REGEX = /^[0-9]{5}(-[0-9]{4})?$/;
 const MAX_PER_EMAIL_PER_DAY = 3;
-
-// DD-214s hold Social Security numbers, so they live in a private bucket that
-// only admins can read, and are never attached to emails.
-const DOCUMENT_BUCKET = "dd214-documents";
-const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
-
-// Checks the file's first bytes, so a renamed file can't pass as a PDF or image.
-function detectDocumentType(bytes: Uint8Array) {
-    const starts = (...sig: number[]) => sig.every((byte, i) => bytes[i] === byte);
-    if (starts(0x25, 0x50, 0x44, 0x46)) return { ext: "pdf", contentType: "application/pdf" };
-    if (starts(0xff, 0xd8, 0xff)) return { ext: "jpg", contentType: "image/jpeg" };
-    if (starts(0x89, 0x50, 0x4e, 0x47)) return { ext: "png", contentType: "image/png" };
-    return null;
-}
-
-const safeFilename = (name: string) => name.replace(/[^\w.\- ()]+/g, "_").slice(0, 150) || "DD-214";
 
 Deno.serve(async (request) => {
     if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -69,50 +54,12 @@ Deno.serve(async (request) => {
         return json({ error: "We've already received your application. We'll be in touch soon." }, 429);
     }
 
-    // Required DD-214
-    const upload = form.get("dd214");
-    if (!(upload instanceof File) || upload.size === 0) {
-        return json({ error: "Please upload your DD-214 to apply." }, 400);
-    }
-    const bytes = new Uint8Array(await upload.arrayBuffer());
-    const type = detectDocumentType(bytes);
-    if (!type || bytes.length > MAX_DOCUMENT_BYTES) {
-        return json({ error: "Your DD-214 must be a PDF, JPG, or PNG file under 10 MB." }, 400);
-    }
-    const documentPath = `${crypto.randomUUID()}.${type.ext}`;
-    const documentName = safeFilename(upload.name);
-    const { error: uploadError } = await db.storage
-        .from(DOCUMENT_BUCKET)
-        .upload(documentPath, bytes, { contentType: type.contentType });
-    if (uploadError) {
-        console.error("DD-214 upload failed:", uploadError.message);
-        return json({ error: "Your DD-214 couldn't be uploaded. Please try again." }, 500);
-    }
-
-    const { data: saved, error: insertError } = await db
-        .from("applications")
-        .insert(application)
-        .select("id")
-        .single();
+    // The DD-214 isn't collected here: a post officer emails the applicant to
+    // request it, then attaches it under Applications -> Documents.
+    const { error: insertError } = await db.from("applications").insert(application);
     if (insertError) {
         console.error("Saving application failed:", insertError.message);
-        await db.storage.from(DOCUMENT_BUCKET).remove([documentPath]);
         return json({ error: "Something went wrong sending your application. Please try again." }, 500);
-    }
-
-    if (documentPath) {
-        const { error: documentError } = await db.from("application_documents").insert({
-            application_id: saved.id,
-            storage_path: documentPath,
-            file_name: documentName,
-            added_by: "applicant",
-        });
-        if (documentError) {
-            console.error("Saving DD-214 record failed:", documentError.message);
-            await db.storage.from(DOCUMENT_BUCKET).remove([documentPath]);
-            await db.from("applications").delete().eq("id", saved.id);
-            return json({ error: "Your DD-214 couldn't be uploaded. Please try again." }, 500);
-        }
     }
 
     // The application is saved even if this email fails, so it still shows in the dashboard
@@ -124,7 +71,7 @@ Deno.serve(async (request) => {
             ["Email", application.email],
             ["Phone", application.phone],
             ["Address", `${application.address}, ${application.city}, ${application.state} ${application.zip}`],
-            ["DD-214", "Uploaded. View it in the Admin Dashboard."],
+            ["DD-214", "Not received yet. Email the applicant to request it, then add it to their application under Documents."],
         ]
             .filter(([, value]) => value)
             .map(

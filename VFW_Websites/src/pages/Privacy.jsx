@@ -81,15 +81,16 @@ function Privacy() {
                     <Section title="Information you give us">
                         <p>
                             <strong>Membership applications.</strong> When you apply on the Join Us page, we collect
-                            your name, email address, phone number, mailing address, and a copy of your DD-214
-                            (Certificate of Release or Discharge). We use this only to review your eligibility, contact
-                            you about your application, and manage your membership.
+                            your name, email address, phone number, and mailing address. We use this only to review
+                            your eligibility, contact you about your application, and manage your membership.
                         </p>
                         <p>
-                            Your DD-214 may contain sensitive details such as your Social Security number. You may black
-                            out your Social Security number before uploading. DD-214s are stored in private, encrypted
-                            storage that only Post officers with admin access can open. They are never posted publicly,
-                            shared on social media, or sent by email.
+                            <strong>DD-214.</strong> After you apply, a Post officer will email you to request a copy
+                            of your DD-214 (Certificate of Release or Discharge) to confirm eligibility. It may contain
+                            sensitive details such as your Social Security number, which you may black out before
+                            sending. Once received, DD-214s are kept in private, encrypted storage that only Post
+                            officers with admin access can open. They are never posted publicly or shared on social
+                            media.
                         </p>
                         <p>
                             <strong>Emails and phone calls.</strong> If you contact us, we use what you send only to

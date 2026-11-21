@@ -105,6 +105,43 @@ export async function uploadEventImage(file) {
     return uploadImage(file, "events");
 }
 
+// ---------- Event dropdown choices (types and bands) ----------
+
+// Which events column each kind of choice fills in.
+const optionColumn = { type: "category", band: "performer" };
+
+// Returns { type: [...names], band: [...names] }, each sorted A-Z.
+export async function fetchEventOptions() {
+    if (!supabase) return { type: [], band: [] };
+    const rows = unwrap(await supabase.from("event_options").select("kind, name").order("name"));
+    return {
+        type: rows.filter((row) => row.kind === "type").map((row) => row.name),
+        band: rows.filter((row) => row.kind === "band").map((row) => row.name),
+    };
+}
+
+export async function addEventOption(kind, name) {
+    const { error } = await supabase.from("event_options").insert({ kind, name });
+    // Already in the list is fine.
+    if (error && error.code !== "23505") throw error;
+}
+
+// How many events (past and upcoming) use a choice.
+export async function countEventsUsingOption(kind, name) {
+    const { count, error } = await supabase
+        .from("events")
+        .select("id", { count: "exact", head: true })
+        .eq(optionColumn[kind], name);
+    if (error) throw error;
+    return count ?? 0;
+}
+
+// Removes a choice and clears it from any events that used it.
+export async function deleteEventOption(kind, name) {
+    unwrap(await supabase.from("events").update({ [optionColumn[kind]]: "" }).eq(optionColumn[kind], name));
+    unwrap(await supabase.from("event_options").delete().eq("kind", kind).eq("name", name));
+}
+
 // ---------- Facebook & Instagram ----------
 
 // Posts an event or photo to the post's Facebook Page and/or Instagram
@@ -149,12 +186,11 @@ export async function deletePhoto(photo) {
 
 // ---------- Membership applications ----------
 
-// Saves the application (plus the optional DD-214 file) and emails the post a copy
-// (supabase/functions/submit-application).
-export async function submitApplication(form, dd214File) {
+// Saves the application and emails the post a copy (supabase/functions/submit-application).
+// The DD-214 is requested by email afterward and attached by an admin in the Applications tab.
+export async function submitApplication(form) {
     const body = new FormData();
     Object.entries(form).forEach(([key, value]) => body.append(key, value));
-    if (dd214File) body.append("dd214", dd214File);
     await callFunction("submit-application", body);
 }
 

@@ -100,6 +100,48 @@ create policy "Admins can change events" on public.events
 
 
 -- ---------------------------------------------------------------------------
+-- Event dropdown choices (event types and bands)
+-- ---------------------------------------------------------------------------
+-- The choices admins pick from for an event's type and band. Admins add and
+-- delete them from the Events tab; visitors filter by them on the home page.
+create table if not exists public.event_options (
+    id uuid primary key default gen_random_uuid(),
+    kind text not null check (kind in ('type', 'band')),
+    -- 50 fits events.category (the shorter of the two event columns).
+    name text not null check (char_length(name) between 1 and 50),
+    created_at timestamptz not null default now(),
+    unique (kind, name)
+);
+alter table public.event_options enable row level security;
+
+drop policy if exists "Anyone can read event options" on public.event_options;
+create policy "Anyone can read event options" on public.event_options
+    for select to anon, authenticated using (true);
+
+drop policy if exists "Admins can change event options" on public.event_options;
+create policy "Admins can change event options" on public.event_options
+    for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- Starting event types, plus any type or band already used on an event.
+-- Safe to run again: existing choices are skipped, deleted ones aren't re-added
+-- unless an event still uses them.
+insert into public.event_options (kind, name)
+select 'type', name from (values
+    ('Dance Night'), ('Live Music'), ('Meeting'), ('Fundraiser'),
+    ('Bingo'), ('Ceremony / Holiday'), ('Community'), ('Other')
+) as defaults (name)
+where not exists (select 1 from public.event_options where kind = 'type')
+on conflict (kind, name) do nothing;
+
+insert into public.event_options (kind, name)
+select distinct 'type', category from public.events where category <> ''
+on conflict (kind, name) do nothing;
+insert into public.event_options (kind, name)
+select distinct 'band', performer from public.events where performer <> '' and char_length(performer) <= 50
+on conflict (kind, name) do nothing;
+
+
+-- ---------------------------------------------------------------------------
 -- Photos (gallery and home page slideshow)
 -- ---------------------------------------------------------------------------
 create table if not exists public.photos (

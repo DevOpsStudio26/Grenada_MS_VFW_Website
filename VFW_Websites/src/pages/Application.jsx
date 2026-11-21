@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { Shield, CheckCircle, ChevronDown, FileText, X } from "lucide-react";
+import { Shield, CheckCircle, ChevronDown, Mail } from "lucide-react";
 import { useContent } from "../hooks/useContent";
 import { submitApplication } from "../services/api";
 import { supabase } from "../services/supabase";
-import { checkDocumentFile, DOCUMENT_ACCEPT, DOCUMENT_MAX_MB } from "../services/storage";
 import { usePageMeta } from "../hooks/usePageMeta";
 
 // Full names for the 50 US states. Mississippi is listed first
@@ -45,21 +44,10 @@ function Application() {
     const [submitted, setSubmitted] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
-    const [dd214, setDd214] = useState(null);
-    const [dd214Error, setDd214Error] = useState("");
 
     function handleChange(event) {
         const { name, value } = event.target;
         setFormData({ ...formData, [name]: value });
-    }
-
-    function handleDd214Change(event) {
-        const file = event.target.files?.[0];
-        event.target.value = "";
-        if (!file) return;
-        const problem = checkDocumentFile(file);
-        setDd214Error(problem ?? "");
-        setDd214(problem ? null : file);
     }
 
     async function handleSubmit(event) {
@@ -76,15 +64,10 @@ function Application() {
             return;
         }
 
-        if (!dd214) {
-            setDd214Error("Please upload your DD-214 to apply.");
-            return;
-        }
-
         setSubmitting(true);
         setError("");
         try {
-            await submitApplication(formData, dd214);
+            await submitApplication(formData);
             setSubmitted(true);
         } catch (submitError) {
             console.error(submitError);
@@ -110,7 +93,8 @@ function Application() {
                         </h2>
                         <p className="text-lg text-gray-600 mb-4">{content.successText}</p>
                         <p className="text-gray-500">
-                            We'll contact you at <strong>{formData.email}</strong>
+                            A post officer will email you at <strong>{formData.email}</strong> to request a copy of
+                            your DD-214. Please watch for it, and check your spam or junk folder too.
                         </p>
                     </div>
                 </div>
@@ -310,47 +294,16 @@ function Application() {
 
                     <hr className="border-gray-200" />
 
-                    <div>
-                        <span id="dd214-label" className="block text-sm font-semibold text-[#0B1E4A] mb-2">
-                            DD-214 (Certificate of Release or Discharge) *
-                        </span>
-                        {dd214 ? (
-                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-2 border-[#D4871A] rounded-lg bg-[#FFF5E8]">
-                                <span className="flex items-center gap-2 min-w-0 text-[#0B1E4A]">
-                                    <FileText size={20} className="shrink-0 text-[#D4871A]" />
-                                    <span className="truncate">{dd214.name}</span>
-                                    <span className="shrink-0 text-sm text-gray-500">
-                                        ({(dd214.size / 1024 / 1024).toFixed(1)} MB)
-                                    </span>
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => setDd214(null)}
-                                    className="shrink-0 p-1 text-gray-500 hover:text-[#9B1C2E]"
-                                    aria-label="Remove DD-214"
-                                >
-                                    <X size={18} />
-                                </button>
-                            </div>
-                        ) : (
-                            <label className="flex flex-col items-center justify-center gap-1 px-4 py-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-[#D4871A] transition-colors text-center">
-                                <FileText size={28} className="text-gray-400" />
-                                <span className="font-semibold text-[#0B1E4A]">Choose a file to upload</span>
-                                <span className="text-sm text-gray-500">PDF, JPG, or PNG, up to {DOCUMENT_MAX_MB} MB</span>
-                                <input
-                                    type="file"
-                                    accept={DOCUMENT_ACCEPT}
-                                    onChange={handleDd214Change}
-                                    aria-labelledby="dd214-label"
-                                    className="sr-only"
-                                />
-                            </label>
-                        )}
-                        {dd214Error && <p className="text-sm text-[#9B1C2E] mt-2">{dd214Error}</p>}
-                        <p className="text-xs text-gray-500 mt-2">
-                            Required to confirm your eligibility. It's stored privately and only post officers can
-                            view it. You may black out your Social Security number first.
-                        </p>
+                    <div className="flex gap-3 rounded-lg bg-[#FFF5E8] border-l-4 border-[#D4871A] p-4">
+                        <Mail size={22} className="shrink-0 text-[#D4871A] mt-0.5" />
+                        <div className="text-sm text-[#0B1E4A]">
+                            <p className="font-semibold mb-1">What happens next</p>
+                            <p className="text-gray-700">
+                                After you apply, one of our post officers will email you to request a copy of your
+                                DD-214 (Certificate of Release or Discharge) so we can confirm your eligibility. Please
+                                watch for an email from us, and check your spam or junk folder if you don't see it.
+                            </p>
+                        </div>
                     </div>
 
                     <div className="bg-gray-50 rounded-lg p-6 text-sm text-gray-600">
