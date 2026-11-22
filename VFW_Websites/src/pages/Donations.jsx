@@ -1,4 +1,4 @@
-import { Heart, Users, Award, ExternalLink } from "lucide-react";
+import { Heart, Users, Award, ExternalLink, Info } from "lucide-react";
 import Flag from "../assets/home/vfw_3.jpg";
 import Flag2 from "../assets/home/american_flag_2.jpg";
 import { useContent } from "../hooks/useContent";
@@ -57,6 +57,12 @@ function Donations() {
 
                         {embedUrl ? (
                             <>
+                                {content.tipNote?.trim() && (
+                                    <div className="flex gap-3 mb-5 p-4 rounded-lg bg-[#FFF5E8] border-l-4 border-[#D4871A] text-sm text-gray-700">
+                                        <Info size={18} className="shrink-0 text-[#D4871A] mt-0.5" />
+                                        <p className="whitespace-pre-line">{content.tipNote}</p>
+                                    </div>
+                                )}
                                 <div className="relative w-full overflow-hidden rounded-md" style={{ height: "900px" }}>
                                     <iframe
                                         title="Donation form powered by Zeffy"

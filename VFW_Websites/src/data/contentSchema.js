@@ -135,6 +135,12 @@ export const contentSections = [
                 validate: (value) =>
                     zeffyEmbedUrl(value) ? null : "This doesn't look like a Zeffy form link, so it won't be shown.",
             },
+            {
+                name: "tipNote",
+                label: "Note above the donation form",
+                type: "textarea",
+                help: "Explains Zeffy's optional tip to donors. Leave blank to hide the note.",
+            },
             { name: "helpTitle", label: "\"How your donation helps\" heading", type: "text" },
             {
                 name: "helpItems",
