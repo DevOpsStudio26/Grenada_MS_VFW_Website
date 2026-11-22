@@ -93,7 +93,7 @@ export const defaultContent = {
         bannerText:
             "Your generous donations help us provide vital services and support to veterans and their families in the Grenada community.",
         formTitle: "Make a Donation",
-        zeffyUrl: "",
+        zeffyUrl: "https://www.zeffy.com/en-US/donation-form/vfw-post--4488",
         tipNote:
             "Our donation form is provided free by Zeffy, which may suggest an optional tip to support their platform. You can set it to $0 by choosing \"Other\". 100% of your donation goes to VFW Post 4488 either way.",
         helpTitle: "How Your Donation Helps",
